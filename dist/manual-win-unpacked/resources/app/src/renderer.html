@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Claude / Codex Manager</title>
+<style>
+:root{font-family:'Segoe UI',Arial,sans-serif;color:#e9eef7;background:#0f172a}body{margin:0}.wrap{max-width:980px;margin:0 auto;padding:28px}.card{background:#172033;border:1px solid #2a3854;border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 10px 30px #0004}h1{margin:0 0 6px;font-size:28px}.muted{color:#9fb0cc}.grid{display:grid;grid-template-columns:190px 1fr auto;gap:10px;align-items:center;margin:10px 0}input,select{background:#0b1220;color:#e9eef7;border:1px solid #33415f;border-radius:10px;padding:10px;font-size:14px}input[type=checkbox]{width:18px;height:18px}.btn{background:#2563eb;color:white;border:0;border-radius:10px;padding:10px 14px;cursor:pointer;font-weight:700}.btn:hover{background:#1d4ed8}.btn.secondary{background:#334155}.btn.danger{background:#b45309}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.tool{border:1px solid #33415f;border-radius:14px;padding:14px;margin-top:12px}.log{white-space:pre-wrap;background:#020617;border:1px solid #33415f;border-radius:12px;padding:12px;height:210px;overflow:auto;color:#cbd5e1}code{background:#0b1220;padding:2px 6px;border-radius:6px}.ok{color:#86efac}.warn{color:#fbbf24}.bad{color:#fca5a5}.pill{display:inline-block;border:1px solid #33415f;border-radius:999px;padding:3px 9px;background:#0b1220;font-size:12px}</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Claude / Codex 桌面管理器</h1>
+  <div class="muted">一键安装部署 Codex CLI 与 Claude Code CLI，并配置中转 base_url / key。项目目录：<code>D:\claude-install</code></div>
+
+  <div class="card">
+    <h2>1. 安装路径</h2>
+    <div class="grid"><label>安装根目录</label><input id="installDir" /><button class="btn secondary" onclick="pick('installDir')">选择</button></div>
+    <div class="grid"><label>npm 全局 prefix</label><input id="npmPrefix" /><button class="btn secondary" onclick="pick('npmPrefix')">选择</button></div>
+    <div class="muted">建议都放 D 盘，避免污染系统 Node 全局目录。</div>
+  </div>
+
+  <div class="card">
+    <h2>2. Codex / Claude Code API 配置</h2>
+    <p class="muted">这里就是修改 API 配置的位置：分别填写 Codex 和 Claude Code 的 <code>base_url</code> 与 <code>key</code>，点击“保存并应用当前 API 配置”后会写入配置文件并重新生成环境脚本。</p>
+    <div class="tool">
+      <div class="row"><input id="codexEnabled" type="checkbox"><b>Codex CLI API 配置</b><span class="muted">npm 包：@openai/codex</span><span id="codexStatus" class="pill muted">待扫描</span></div>
+      <div class="grid"><label>Package</label><input id="codexPackage" /><span></span></div>
+      <div class="grid"><label>Codex Provider</label><input id="codexProvider" placeholder="例如：rightcode" /><span></span></div>
+      <div class="grid"><label>Codex Model</label><input id="codexModel" placeholder="例如：gpt-5.5" /><span></span></div>
+      <div class="grid"><label>Codex Base URL</label><input id="codexBaseUrl" placeholder="例如：http://localhost:3000/v1" /><span></span></div>
+      <div class="grid"><label>Codex API Key</label><input id="codexApiKey" type="password" placeholder="填写 Codex 使用的 OPENAI_API_KEY" /><button class="btn secondary" onclick="toggleSecret('codexApiKey')">显示/隐藏</button></div>
+      <div class="grid"><label>安装位置</label><input id="codexPath" readonly placeholder="启动后自动扫描" /><span></span></div>
+    </div>
+    <div class="tool">
+      <div class="row"><input id="claudeEnabled" type="checkbox"><b>Claude Code API 配置</b><span class="muted">npm 包：@anthropic-ai/claude-code</span><span id="claudeStatus" class="pill muted">待扫描</span></div>
+      <div class="grid"><label>Package</label><input id="claudePackage" /><span></span></div>
+      <div class="grid"><label>Claude Base URL</label><input id="claudeBaseUrl" placeholder="例如：http://localhost:3000/v1" /><span></span></div>
+      <div class="grid"><label>Claude API Key</label><input id="claudeApiKey" type="password" placeholder="填写 Claude Code 使用的 ANTHROPIC_API_KEY" /><button class="btn secondary" onclick="toggleSecret('claudeApiKey')">显示/隐藏</button></div>
+      <div class="grid"><label>安装位置</label><input id="claudePath" readonly placeholder="启动后自动扫描" /><span></span></div>
+    </div>
+    <div class="row">
+      <button class="btn" onclick="applyConfig()">保存并应用当前 API 配置</button>
+      <button class="btn secondary" onclick="saveCurrentProxyProfile()">保存为中转档案</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3. 中转配置</h2>
+    <div class="grid"><label>当前中转档案</label><select id="proxyProfileSelect" onchange="loadSelectedProxyProfile()"></select><button class="btn" onclick="applySelectedProxyProfile()">切换并应用</button></div>
+    <div class="grid"><label>档案名称</label><input id="proxyProfileName" placeholder="例如：本机 OpenClaw / 备用中转" /><span></span></div>
+    <div class="grid"><label>统一 Base URL</label><input id="commonBaseUrl" placeholder="例如：http://localhost:3000/v1" /><button class="btn secondary" onclick="copyBaseUrlToBoth()">应用到两者</button></div>
+    <div class="row">
+      <button class="btn secondary" onclick="setLocalProxy()">填入本机中转 localhost:3000/v1</button>
+      <button class="btn secondary" onclick="loadSelectedProxyProfile()">载入所选档案</button>
+      <button class="btn" onclick="saveCurrentProxyProfile()">保存/更新当前档案</button>
+      <button class="btn" onclick="applyConfig()">保存并生成中转环境脚本</button>
+      <button class="btn danger" onclick="deleteSelectedProxyProfile()">删除所选档案</button>
+    </div>
+    <p class="muted">可以保存多组 Codex / Claude Code 的 <code>base_url</code> 和 <code>key</code>，通过“切换并应用”快速切换。Codex 写入 <code>OPENAI_BASE_URL / OPENAI_API_KEY</code>；Claude Code 写入 <code>ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY</code>。</p>
+  </div>
+
+  <div class="card">
+    <h2>4. 操作</h2>
+    <div class="row">
+      <button class="btn" onclick="save()">保存配置</button>
+      <button class="btn" onclick="applyConfig()">仅生成环境配置</button>
+      <button class="btn danger" onclick="installAll()">一键安装 / 更新 Codex + Claude Code</button>
+      <button class="btn secondary" onclick="checkVersions()">检查版本</button>
+      <button class="btn secondary" onclick="scanTools()">重新扫描安装状态</button>
+      <button class="btn secondary" onclick="loadLog()">读取日志</button>
+    </div>
+    <p class="muted">安装完成后会生成：<code>安装根目录\ai-cli-env.cmd</code> 与 <code>安装根目录\ai-cli-env.sh</code>，用于加载 base_url/key 与 PATH。</p>
+  </div>
+
+  <div class="card">
+    <h2>日志</h2>
+    <div id="status" class="muted">就绪</div>
+    <div id="log" class="log"></div>
+  </div>
+</div>
+<script>
+let cfg;
+const $=id=>document.getElementById(id);
+function log(s){ $('log').textContent += s; $('log').scrollTop=$('log').scrollHeight; }
+function readForm(){ return {
+ installDir:$('installDir').value, npmPrefix:$('npmPrefix').value, activeProxyProfile:$('proxyProfileName').value, proxyProfiles: cfg?.proxyProfiles||[],
+ codex:{enabled:$('codexEnabled').checked, package:$('codexPackage').value, provider:$('codexProvider').value, model:$('codexModel').value, baseUrl:$('codexBaseUrl').value, apiKey:$('codexApiKey').value},
+ claude:{enabled:$('claudeEnabled').checked, package:$('claudePackage').value, baseUrl:$('claudeBaseUrl').value, apiKey:$('claudeApiKey').value}
+};}
+function currentProxyProfile(){ return { name:$('proxyProfileName').value.trim(), codexBaseUrl:$('codexBaseUrl').value.trim(), codexApiKey:$('codexApiKey').value, claudeBaseUrl:$('claudeBaseUrl').value.trim(), claudeApiKey:$('claudeApiKey').value }; }
+function renderProxyProfiles(c){ const sel=$('proxyProfileSelect'); sel.innerHTML=''; (c.proxyProfiles||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p.name; o.textContent=p.name; if(p.name===c.activeProxyProfile)o.selected=true; sel.appendChild(o); }); $('proxyProfileName').value=c.activeProxyProfile||sel.value||''; }
+function fillProxyFields(p){ if(!p)return; $('proxyProfileName').value=p.name||''; $('codexBaseUrl').value=p.codexBaseUrl||''; $('codexApiKey').value=p.codexApiKey||''; $('claudeBaseUrl').value=p.claudeBaseUrl||''; $('claudeApiKey').value=p.claudeApiKey||''; $('commonBaseUrl').value=(p.codexBaseUrl&&p.codexBaseUrl===p.claudeBaseUrl)?p.codexBaseUrl:''; }
+function fill(c){ cfg=c; $('installDir').value=c.installDir; $('npmPrefix').value=c.npmPrefix; $('codexEnabled').checked=c.codex.enabled; $('codexPackage').value=c.codex.package; $('codexProvider').value=c.codex.provider||'rightcode'; $('codexModel').value=c.codex.model||'gpt-5.5'; $('codexBaseUrl').value=c.codex.baseUrl; $('codexApiKey').value=c.codex.apiKey||''; $('claudeEnabled').checked=c.claude.enabled; $('claudePackage').value=c.claude.package; $('claudeBaseUrl').value=c.claude.baseUrl; $('claudeApiKey').value=c.claude.apiKey||''; $('commonBaseUrl').value=(c.codex.baseUrl===c.claude.baseUrl?c.codex.baseUrl:''); renderProxyProfiles(c); }
+function renderToolStatus(id, info){ const el=$(id+'Status'); if(!el||!info)return; el.className='pill '+(info.installed?'ok':'bad'); el.textContent=info.installed?('已安装：'+info.version):'未检测到'; el.title=info.output||''; const pathEl=$(id+'Path'); if(pathEl) pathEl.value=info.installPath||'未检测到'; }
+function copyBaseUrlToBoth(){ const v=$('commonBaseUrl').value.trim(); if(!v){ $('status').innerHTML='<span class="warn">请先填写统一 Base URL</span>'; return; } $('codexBaseUrl').value=v; $('claudeBaseUrl').value=v; $('status').innerHTML='<span class="ok">已把统一 Base URL 填入 Codex 和 Claude Code</span>'; }
+function toggleSecret(id){ const el=$(id); el.type=el.type==='password'?'text':'password'; }
+function setLocalProxy(){ $('commonBaseUrl').value='http://localhost:3000/v1'; if(!$('proxyProfileName').value.trim()) $('proxyProfileName').value='本机 OpenClaw'; copyBaseUrlToBoth(); }
+function loadSelectedProxyProfile(){ const name=$('proxyProfileSelect').value; const p=(cfg?.proxyProfiles||[]).find(x=>x.name===name); fillProxyFields(p); $('status').innerHTML=p?'<span class="ok">已载入中转档案：'+p.name+'</span>':'<span class="warn">没有可载入的中转档案</span>'; }
+async function saveCurrentProxyProfile(){ const p=currentProxyProfile(); if(!p.name){ $('status').innerHTML='<span class="warn">请先填写档案名称</span>'; return; } cfg=await window.api.saveProxyProfile(readForm(), p); fill(cfg); $('proxyProfileSelect').value=p.name; $('status').innerHTML='<span class="ok">中转档案已保存：'+p.name+'</span>'; }
+async function deleteSelectedProxyProfile(){ const name=$('proxyProfileSelect').value; if(!name){ $('status').innerHTML='<span class="warn">没有可删除的中转档案</span>'; return; } cfg=await window.api.deleteProxyProfile(readForm(), name); fill(cfg); $('status').innerHTML='<span class="ok">中转档案已删除：'+name+'</span>'; }
+async function applySelectedProxyProfile(){ const name=$('proxyProfileSelect').value||$('proxyProfileName').value.trim(); if(!name){ $('status').innerHTML='<span class="warn">请先选择中转档案</span>'; return; } const r=await window.api.applyProxyProfile(readForm(), name); if(!r.ok){ $('status').innerHTML='<span class="bad">'+r.error+'</span>'; return; } cfg=r.config; fill(cfg); $('status').innerHTML='<span class="ok">已切换并生成环境脚本：'+name+'</span>'; }
+async function scanTools(){ $('status').innerHTML='<span class="warn">正在扫描 Codex / Claude Code 安装状态...</span>'; const r=await window.api.scanTools(readForm()); renderToolStatus('codex', r.codex); renderToolStatus('claude', r.claude); $('status').innerHTML='<span class="ok">扫描完成</span> <span class="muted">'+new Date(r.scannedAt).toLocaleString()+'</span>'; log('\n=== AUTO SCAN ===\n'+JSON.stringify(r,null,2)+'\n'); return r; }
+async function pick(id){ const d=await window.api.chooseDir(); if(d) $(id).value=d; }
+async function save(){ cfg=await window.api.saveConfig(readForm()); $('status').innerHTML='<span class="ok">配置已保存</span>'; }
+async function applyConfig(){ await save(); await window.api.applyConfig(readForm()); $('status').innerHTML='<span class="ok">当前 Codex / Claude Code API 配置已保存并应用；Codex config.toml/auth.json、环境脚本和 Claude Code 配置文件均已更新</span>'; }
+async function installAll(){ await save(); $('status').innerHTML='<span class="warn">正在安装，请等待 npm 输出...</span>'; log('\n=== INSTALL START ===\n'); const r=await window.api.installAll(readForm()); log('\n=== RESULT ===\n'+JSON.stringify(r,null,2)+'\n'); $('status').innerHTML='<span class="ok">安装流程结束，正在重新扫描...</span>'; await scanTools(); }
+async function checkVersions(){ await save(); log('\n=== VERSION CHECK ===\n'); const r=await window.api.checkVersions(readForm()); renderToolStatus('codex', r.codex); renderToolStatus('claude', r.claude); log(JSON.stringify(r,null,2)+'\n'); }
+async function loadLog(){ $('log').textContent=await window.api.readLog(); }
+window.api.onLog(log);
+window.api.getConfig().then(c=>{ fill(c); scanTools(); });
+</script>
+</body>
+</html>
