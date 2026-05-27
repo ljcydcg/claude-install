@@ -11,6 +11,31 @@ function firstOutputLine(result, fallback = '') {
   return output ? output.split(/\r?\n/)[0].trim() : fallback;
 }
 
+function pathKeyFor(env) {
+  return Object.keys(env || {}).find(k => k.toLowerCase() === 'path') || 'PATH';
+}
+
+function prependPathEntries(baseEnv, entries) {
+  const env = { ...(baseEnv || {}) };
+  const pathKey = pathKeyFor(env);
+  const currentPath = env[pathKey] || '';
+  const parts = String(currentPath || '').split(path.delimiter).filter(Boolean);
+  const seen = new Set(parts.map(p => p.toLowerCase()));
+  const prefix = [];
+  for (const entry of entries) {
+    const value = String(entry || '').trim();
+    const key = value.toLowerCase();
+    if (!value || seen.has(key)) continue;
+    prefix.push(value);
+    seen.add(key);
+  }
+  env[pathKey] = [...prefix, ...parts].join(path.delimiter);
+  for (const key of Object.keys(env)) {
+    if (key !== pathKey && key.toLowerCase() === 'path') delete env[key];
+  }
+  return env;
+}
+
 function buildToolStatus(name, versionResult, pathResult) {
   const output = trimOutput(versionResult && versionResult.output);
   const code = Number.isInteger(versionResult && versionResult.code) ? versionResult.code : -1;
@@ -28,10 +53,8 @@ function buildToolStatus(name, versionResult, pathResult) {
 
 function buildScanEnv(cfg, baseEnv = process.env) {
   const npmPrefix = cfg && cfg.npmPrefix ? cfg.npmPrefix : '';
-  return {
-    ...baseEnv,
-    PATH: npmPrefix ? `${npmPrefix};${baseEnv.PATH || ''}` : (baseEnv.PATH || '')
-  };
+  const commonNodeDirs = process.platform === 'win32' ? ['C:\\Program Files\\nodejs'] : [];
+  return prependPathEntries(baseEnv, [npmPrefix, ...commonNodeDirs]);
 }
 
 function escapeSh(value) {

@@ -53,7 +53,13 @@ function run() {
 
   const env = buildScanEnv({ npmPrefix: 'D:\\ai-cli-tools\\npm-global' }, { PATH: 'C:\\Windows\\System32' });
   assert.ok(env.PATH.startsWith('D:\\ai-cli-tools\\npm-global;'));
+  assert.ok(env.PATH.includes('C:\\Program Files\\nodejs'));
   assert.ok(env.PATH.includes('C:\\Windows\\System32'));
+
+  const envWithPathKey = buildScanEnv({ npmPrefix: 'D:\\ai-cli-tools\\npm-global' }, { Path: 'C:\\Windows\\System32' });
+  assert.ok(envWithPathKey.Path.startsWith('D:\\ai-cli-tools\\npm-global;'));
+  assert.ok(envWithPathKey.Path.includes('C:\\Program Files\\nodejs'));
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(envWithPathKey, 'PATH'), false);
 
   const claudeSettings = buildClaudeSettings({ theme: 'dark', env: { OLD: 'keep' } }, {
     claude: { baseUrl: 'https://proxy.example/anthropic', apiKey: 'sk-claude-real' }
