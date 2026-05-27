@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+
+# build outputs
+dist/
+out/
+build/
+
+# runtime/user data and logs
+data/
+*.log
+
+# local env/secrets
+.env
+.env.*
+*.local
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Electron caches
+.cache/
