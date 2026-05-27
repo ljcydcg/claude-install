@@ -6,8 +6,8 @@
   "scripts": {
     "start": "electron .",
     "test": "node tests/scanner.test.js",
-    "build:win": "electron-builder --win --x64",
-    "dist": "electron-builder"
+    "build:win": "electron-builder --win portable --x64 --publish never",
+    "dist": "electron-builder --publish never"
   },
   "keywords": [
     "codex",

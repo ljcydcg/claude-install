@@ -5,16 +5,19 @@ const os = require('os');
 const { spawn } = require('child_process');
 const { buildToolStatus, buildScanEnv, buildProxyEnvLines, normalizeProxyProfiles, upsertProxyProfile, removeProxyProfile, applyProxyProfileToConfig, buildClaudeSettings, writeCodexSettings } = require('./scanner');
 
-const ROOT = path.join('D:', 'claude-install');
-const DATA = path.join(ROOT, 'data');
+// 打包成单 exe 后，程序不能依赖 D:\\claude-install 这类开发机路径。
+// 用户配置和日志放到 Electron 的 userData 目录，确保换电脑也能直接运行。
+const DATA = path.join(app.getPath('userData'), 'data');
 const CONFIG = path.join(DATA, 'config.json');
 const LOG = path.join(DATA, 'install.log');
 const CLAUDE_SETTINGS = path.join(os.homedir(), '.claude', 'settings.json');
 fs.mkdirSync(DATA, { recursive: true });
 
+const DEFAULT_INSTALL_DIR = path.join(os.homedir(), 'ai-cli-tools');
+
 const defaults = {
-  installDir: path.join('D:', 'ai-cli-tools'),
-  npmPrefix: path.join('D:', 'ai-cli-tools', 'npm-global'),
+  installDir: DEFAULT_INSTALL_DIR,
+  npmPrefix: path.join(DEFAULT_INSTALL_DIR, 'npm-global'),
   codex: { enabled: true, package: '@openai/codex', provider: 'rightcode', model: 'gpt-5.5', baseUrl: 'http://localhost:3000/v1', apiKey: '' },
   claude: { enabled: true, package: '@anthropic-ai/claude-code', baseUrl: 'http://localhost:3000/v1', apiKey: '' },
   activeProxyProfile: '本机 OpenClaw',
