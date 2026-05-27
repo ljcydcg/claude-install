@@ -93,8 +93,9 @@ function runCommand(command, args, opts = {}) {
 
 function runProcess(command, args, opts = {}) {
   return new Promise((resolve) => {
-    appendLog(`RUN ${command} ${args.join(' ')}`);
-    const child = spawn(command, args, { windowsHide: true, ...opts });
+    const { logArgs, ...spawnOpts } = opts;
+    appendLog(`RUN ${command} ${(logArgs || args).join(' ')}`);
+    const child = spawn(command, args, { windowsHide: true, ...spawnOpts });
     let output = '';
     child.stdout.on('data', d => { const t = d.toString(); output += t; mainWindow?.webContents.send('log', redact(t)); });
     child.stderr.on('data', d => { const t = d.toString(); output += t; mainWindow?.webContents.send('log', redact(t)); });
@@ -120,6 +121,19 @@ function powershellPath() {
   return path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
+function psString(value) {
+  return `'${String(value || '').replace(/'/g, "''")}'`;
+}
+
+async function runPowerShell(script) {
+  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+  return runProcess(
+    powershellPath(),
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+    { logArgs: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', '<encoded>'] }
+  );
+}
+
 async function ensureUserPathEntry(entry) {
   const binPath = String(entry || '').trim();
   if (!binPath) return { code: 0, output: 'No npm global bin path configured.' };
@@ -129,7 +143,7 @@ async function ensureUserPathEntry(entry) {
   }
   const script = [
     "$ErrorActionPreference = 'Stop'",
-    "$entry = $args[0].Trim().TrimEnd('\\')",
+    `$entry = ${psString(binPath)}.Trim().TrimEnd('\\')`,
     "$current = [Environment]::GetEnvironmentVariable('Path', 'User')",
     '$parts = @()',
     'if ($current) {',
@@ -145,22 +159,72 @@ async function ensureUserPathEntry(entry) {
     'if (-not $exists) {',
     "  $next = @($parts + $entry) -join ';'",
     "  [Environment]::SetEnvironmentVariable('Path', $next, 'User')",
+    '  try {',
     "  $signature = '[DllImport(\"user32.dll\", SetLastError=true, CharSet=CharSet.Auto)] public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);'",
-    "  try { Add-Type -Namespace Win32 -Name NativeMethods -MemberDefinition $signature -ErrorAction Stop } catch {}",
+    '    Add-Type -Namespace Win32 -Name NativeMethods -MemberDefinition $signature -ErrorAction Stop',
     '  $sendResult = [UIntPtr]::Zero',
     "  [Win32.NativeMethods]::SendMessageTimeout([IntPtr]0xffff, 0x1a, [UIntPtr]::Zero, 'Environment', 0x2, 5000, [ref]$sendResult) | Out-Null",
+    '  } catch {}',
     "  Write-Output \"added $entry\"",
     '} else {',
     "  Write-Output \"already present $entry\"",
-    '}'
+    '}',
+    "$after = [Environment]::GetEnvironmentVariable('Path', 'User')",
+    '$afterParts = @()',
+    'if ($after) {',
+    "  $afterParts = $after -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ }",
+    '}',
+    '$contains = $false',
+    'foreach ($part in $afterParts) {',
+    "  if ($part.TrimEnd('\\').Equals($entry, [StringComparison]::OrdinalIgnoreCase)) {",
+    '    $contains = $true',
+    '    break',
+    '  }',
+    '}',
+    'if (-not $contains) { throw "user Path does not contain $entry after update" }',
+    'Write-Output "verified user PATH contains $entry"'
   ].join('\n');
-  const result = await runProcess(powershellPath(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script, binPath]);
+  const result = await runPowerShell(script);
   return {
     code: result.code,
     output: result.code === 0
       ? `${result.output.trim()}\nOpen a new terminal to use codex and claude directly.`
       : `Failed to update user PATH for ${binPath}.\n${result.output}`
   };
+}
+
+async function setNpmGlobalPrefix(npmPrefix, env) {
+  const target = String(npmPrefix || '').trim();
+  const primary = await runCommand('npm', ['config', 'set', 'prefix', JSON.stringify(target), '--location=user'], { env });
+  if (primary.code === 0) return primary;
+  const fallback = await runCommand('npm', ['config', 'set', 'prefix', JSON.stringify(target)], { env });
+  return {
+    code: fallback.code,
+    output: `${primary.output}\nFallback without --location=user:\n${fallback.output}`
+  };
+}
+
+async function verifyGlobalInstall(cfg, env) {
+  const lines = ['=== GLOBAL COMMAND VERIFY ==='];
+  let ok = true;
+  const prefix = await runCommand('npm', ['prefix', '-g'], { env });
+  if (prefix.code !== 0) ok = false;
+  lines.push(`npm prefix -g (${prefix.code}): ${prefix.output.trim()}`);
+
+  for (const item of [
+    { enabled: cfg.codex?.enabled, command: 'codex' },
+    { enabled: cfg.claude?.enabled, command: 'claude' }
+  ]) {
+    if (!item.enabled) continue;
+    const located = await runCommand('where', [item.command], { env });
+    const version = located.code === 0 ? await runCommand(item.command, ['--version'], { env }) : { code: -1, output: 'command not found in configured PATH' };
+    if (located.code !== 0 || version.code !== 0) ok = false;
+    lines.push(`where ${item.command} (${located.code}): ${located.output.trim()}`);
+    lines.push(`${item.command} --version (${version.code}): ${version.output.trim()}`);
+  }
+
+  lines.push('Open a new CMD/PowerShell window before running codex or claude directly.');
+  return { code: ok ? 0 : 1, output: lines.join('\n') };
 }
 
 async function commandOk(command, args = ['--version'], opts = {}) {
@@ -261,11 +325,12 @@ ipcMain.handle('install:all', async (_, cfg) => {
   if (!nodeStatus.ok) return results;
   env = { ...nodeStatus.env, npm_config_prefix: cfg.npmPrefix };
 
-  results.push(await runCommand('npm', ['config', 'set', 'prefix', JSON.stringify(cfg.npmPrefix)], { env }));
+  results.push(await setNpmGlobalPrefix(cfg.npmPrefix, env));
   if (cfg.codex?.enabled) results.push(await runCommand('npm', ['install', '-g', cfg.codex.package || '@openai/codex'], { env }));
   if (cfg.claude?.enabled) results.push(await runCommand('npm', ['install', '-g', cfg.claude.package || '@anthropic-ai/claude-code'], { env }));
   const writeResult = await writeEnvFiles(cfg);
   results.push({ code: writeResult.pathResult.code, output: writeResult.pathResult.output });
+  results.push(await verifyGlobalInstall(cfg, buildScanEnv(cfg, env)));
   return results;
 });
 
