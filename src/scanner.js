@@ -36,6 +36,35 @@ function prependPathEntries(baseEnv, entries) {
   return env;
 }
 
+function normalizePathEntry(entry) {
+  return String(entry || '').trim().replace(/[\\/]+$/, '');
+}
+
+function pathEntryKey(entry) {
+  const normalized = normalizePathEntry(entry);
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
+function addPathEntries(currentPath, entries) {
+  const parts = String(currentPath || '').split(path.delimiter).map(normalizePathEntry).filter(Boolean);
+  const seen = new Set(parts.map(pathEntryKey));
+  for (const entry of entries || []) {
+    const normalized = normalizePathEntry(entry);
+    if (!normalized) continue;
+    const key = pathEntryKey(normalized);
+    if (seen.has(key)) continue;
+    parts.push(normalized);
+    seen.add(key);
+  }
+  return parts.join(path.delimiter);
+}
+
+function buildNpmGlobalBinPath(npmPrefix) {
+  const prefix = normalizePathEntry(npmPrefix);
+  if (!prefix) return '';
+  return process.platform === 'win32' ? prefix : path.join(prefix, 'bin');
+}
+
 function buildToolStatus(name, versionResult, pathResult) {
   const output = trimOutput(versionResult && versionResult.output);
   const code = Number.isInteger(versionResult && versionResult.code) ? versionResult.code : -1;
@@ -52,7 +81,7 @@ function buildToolStatus(name, versionResult, pathResult) {
 }
 
 function buildScanEnv(cfg, baseEnv = process.env) {
-  const npmPrefix = cfg && cfg.npmPrefix ? cfg.npmPrefix : '';
+  const npmPrefix = buildNpmGlobalBinPath(cfg && cfg.npmPrefix ? cfg.npmPrefix : '');
   const commonNodeDirs = process.platform === 'win32' ? ['C:\\Program Files\\nodejs'] : [];
   return prependPathEntries(baseEnv, [npmPrefix, ...commonNodeDirs]);
 }
@@ -311,6 +340,8 @@ function writeCodexSettings(cfg, env = process.env) {
 }
 
 module.exports = {
+  addPathEntries,
+  buildNpmGlobalBinPath,
   buildToolStatus,
   buildScanEnv,
   buildProxyEnvLines,

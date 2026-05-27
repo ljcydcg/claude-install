@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
-const { buildToolStatus, buildScanEnv, buildProxyEnvLines, normalizeProxyProfiles, upsertProxyProfile, removeProxyProfile, applyProxyProfileToConfig, buildClaudeSettings, writeCodexSettings } = require('./scanner');
+const { addPathEntries, buildNpmGlobalBinPath, buildToolStatus, buildScanEnv, buildProxyEnvLines, normalizeProxyProfiles, upsertProxyProfile, removeProxyProfile, applyProxyProfileToConfig, buildClaudeSettings, writeCodexSettings } = require('./scanner');
 
 // 打包成单 exe 后，程序不能依赖 D:\\claude-install 这类开发机路径。
 // 用户配置和日志放到 Electron 的 userData 目录，确保换电脑也能直接运行。
@@ -91,11 +91,76 @@ function runCommand(command, args, opts = {}) {
   });
 }
 
+function runProcess(command, args, opts = {}) {
+  return new Promise((resolve) => {
+    appendLog(`RUN ${command} ${args.join(' ')}`);
+    const child = spawn(command, args, { windowsHide: true, ...opts });
+    let output = '';
+    child.stdout.on('data', d => { const t = d.toString(); output += t; mainWindow?.webContents.send('log', redact(t)); });
+    child.stderr.on('data', d => { const t = d.toString(); output += t; mainWindow?.webContents.send('log', redact(t)); });
+    child.on('close', code => { appendLog(`EXIT ${code}\n${redact(output).slice(-4000)}`); resolve({ code, output: redact(output) }); });
+    child.on('error', err => resolve({ code: -1, output: String(err) }));
+  });
+}
+
 function withCommonNodePath(env = process.env) {
   const nodeDir = 'C:\\Program Files\\nodejs';
   const pathKey = Object.keys(env).find(k => k.toLowerCase() === 'path') || 'Path';
   const currentPath = env[pathKey] || '';
   return { ...env, [pathKey]: currentPath.includes(nodeDir) ? currentPath : `${nodeDir};${currentPath}` };
+}
+
+function addToCurrentProcessPath(entry) {
+  const pathKey = Object.keys(process.env).find(k => k.toLowerCase() === 'path') || 'Path';
+  process.env[pathKey] = addPathEntries(process.env[pathKey] || '', [entry]);
+}
+
+function powershellPath() {
+  const systemRoot = process.env.SystemRoot || 'C:\\Windows';
+  return path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+}
+
+async function ensureUserPathEntry(entry) {
+  const binPath = String(entry || '').trim();
+  if (!binPath) return { code: 0, output: 'No npm global bin path configured.' };
+  addToCurrentProcessPath(binPath);
+  if (process.platform !== 'win32') {
+    return { code: 0, output: `Updated current process PATH with ${binPath}.` };
+  }
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "$entry = $args[0].Trim().TrimEnd('\\')",
+    "$current = [Environment]::GetEnvironmentVariable('Path', 'User')",
+    '$parts = @()',
+    'if ($current) {',
+    "  $parts = $current -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ }",
+    '}',
+    '$exists = $false',
+    'foreach ($part in $parts) {',
+    "  if ($part.TrimEnd('\\').Equals($entry, [StringComparison]::OrdinalIgnoreCase)) {",
+    '    $exists = $true',
+    '    break',
+    '  }',
+    '}',
+    'if (-not $exists) {',
+    "  $next = @($parts + $entry) -join ';'",
+    "  [Environment]::SetEnvironmentVariable('Path', $next, 'User')",
+    "  $signature = '[DllImport(\"user32.dll\", SetLastError=true, CharSet=CharSet.Auto)] public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);'",
+    "  try { Add-Type -Namespace Win32 -Name NativeMethods -MemberDefinition $signature -ErrorAction Stop } catch {}",
+    '  $sendResult = [UIntPtr]::Zero',
+    "  [Win32.NativeMethods]::SendMessageTimeout([IntPtr]0xffff, 0x1a, [UIntPtr]::Zero, 'Environment', 0x2, 5000, [ref]$sendResult) | Out-Null",
+    "  Write-Output \"added $entry\"",
+    '} else {',
+    "  Write-Output \"already present $entry\"",
+    '}'
+  ].join('\n');
+  const result = await runProcess(powershellPath(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script, binPath]);
+  return {
+    code: result.code,
+    output: result.code === 0
+      ? `${result.output.trim()}\nOpen a new terminal to use codex and claude directly.`
+      : `Failed to update user PATH for ${binPath}.\n${result.output}`
+  };
 }
 
 async function commandOk(command, args = ['--version'], opts = {}) {
@@ -199,7 +264,8 @@ ipcMain.handle('install:all', async (_, cfg) => {
   results.push(await runCommand('npm', ['config', 'set', 'prefix', JSON.stringify(cfg.npmPrefix)], { env }));
   if (cfg.codex?.enabled) results.push(await runCommand('npm', ['install', '-g', cfg.codex.package || '@openai/codex'], { env }));
   if (cfg.claude?.enabled) results.push(await runCommand('npm', ['install', '-g', cfg.claude.package || '@anthropic-ai/claude-code'], { env }));
-  await writeEnvFiles(cfg);
+  const writeResult = await writeEnvFiles(cfg);
+  results.push({ code: writeResult.pathResult.code, output: writeResult.pathResult.output });
   return results;
 });
 
@@ -207,7 +273,7 @@ async function writeEnvFiles(cfg) {
   fs.mkdirSync(cfg.installDir, { recursive: true });
   const envFile = path.join(cfg.installDir, 'ai-cli-env.cmd');
   const bashFile = path.join(cfg.installDir, 'ai-cli-env.sh');
-  const binPath = path.join(cfg.npmPrefix, process.platform === 'win32' ? '' : 'bin');
+  const binPath = buildNpmGlobalBinPath(cfg.npmPrefix);
   const proxyLines = buildProxyEnvLines(cfg);
   const cmd = [
     '@echo off',
@@ -223,7 +289,10 @@ async function writeEnvFiles(cfg) {
   fs.writeFileSync(bashFile, sh, 'utf8');
   if (cfg.codex?.enabled) writeCodexCliSettings(cfg);
   writeClaudeSettings(cfg);
+  const pathResult = await ensureUserPathEntry(binPath);
+  appendLog(`USER PATH ${pathResult.code === 0 ? 'OK' : 'FAILED'} ${binPath}`);
   appendLog(`WROTE env files ${envFile} ${bashFile}`);
+  return { envFile, bashFile, binPath, pathResult };
 }
 
 ipcMain.handle('config:apply', async (_, cfg) => { writeConfig(cfg); await writeEnvFiles(cfg); return { ok: true }; });

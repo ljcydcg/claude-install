@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { buildToolStatus, buildScanEnv, buildProxyEnvLines, normalizeProxyProfiles, applyProxyProfileToConfig, upsertProxyProfile, removeProxyProfile, buildClaudeSettings } = require('../src/scanner');
+const { addPathEntries, buildNpmGlobalBinPath, buildToolStatus, buildScanEnv, buildProxyEnvLines, normalizeProxyProfiles, applyProxyProfileToConfig, upsertProxyProfile, removeProxyProfile, buildClaudeSettings } = require('../src/scanner');
 
 function run() {
   const installed = buildToolStatus('codex', { code: 0, output: 'codex-cli 1.2.3\n' }, { code: 0, output: 'D:\\ai-cli-tools\\npm-global\\codex.cmd\n' });
@@ -60,6 +60,12 @@ function run() {
   assert.ok(envWithPathKey.Path.startsWith('D:\\ai-cli-tools\\npm-global;'));
   assert.ok(envWithPathKey.Path.includes('C:\\Program Files\\nodejs'));
   assert.strictEqual(Object.prototype.hasOwnProperty.call(envWithPathKey, 'PATH'), false);
+
+  assert.strictEqual(buildNpmGlobalBinPath('D:\\ai-cli-tools\\npm-global\\'), 'D:\\ai-cli-tools\\npm-global');
+  assert.strictEqual(
+    addPathEntries('C:\\Windows\\System32;D:\\ai-cli-tools\\npm-global', ['D:\\ai-cli-tools\\npm-global\\', 'C:\\Tools']),
+    'C:\\Windows\\System32;D:\\ai-cli-tools\\npm-global;C:\\Tools'
+  );
 
   const claudeSettings = buildClaudeSettings({ theme: 'dark', env: { OLD: 'keep' } }, {
     claude: { baseUrl: 'https://proxy.example/anthropic', apiKey: 'sk-claude-real' }
