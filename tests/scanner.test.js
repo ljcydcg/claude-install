@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { addPathEntries, buildNpmGlobalBinPath, buildToolStatus, buildScanEnv, buildProxyEnvLines, normalizeProxyProfiles, applyProxyProfileToConfig, upsertProxyProfile, removeProxyProfile, buildClaudeSettings } = require('../src/scanner');
+const { addPathEntries, buildNpmGlobalBinPath, buildToolStatus, buildScanEnv, buildProxyEnvLines, buildClaudeSettings } = require('../src/scanner');
 
 function run() {
   const installed = buildToolStatus('codex', { code: 0, output: 'codex-cli 1.2.3\n' }, { code: 0, output: 'D:\\ai-cli-tools\\npm-global\\codex.cmd\n' });
@@ -27,29 +27,6 @@ function run() {
   assert.ok(lines.cmd.includes('set "ANTHROPIC_BASE_URL=https://proxy.example/anthropic"'));
   assert.ok(lines.sh.includes("export OPENAI_API_KEY='sk-codex'"));
   assert.ok(lines.sh.includes("export ANTHROPIC_API_KEY='sk-claude'"));
-
-  const profiles = normalizeProxyProfiles([
-    { name: '本机', codexBaseUrl: 'http://localhost:3000/v1', codexApiKey: 'k1', claudeBaseUrl: '', claudeApiKey: '' },
-    { name: '本机', codexBaseUrl: 'https://duplicate/v1' },
-    { name: '', codexBaseUrl: 'https://ignored/v1' }
-  ]);
-  assert.deepStrictEqual(profiles, [
-    { name: '本机', codexBaseUrl: 'http://localhost:3000/v1', codexApiKey: 'k1', claudeBaseUrl: '', claudeApiKey: '' }
-  ]);
-
-  const cfg = applyProxyProfileToConfig({ codex: {}, claude: {} }, {
-    name: '中转A', codexBaseUrl: 'https://a.example/v1', codexApiKey: 'oa', claudeBaseUrl: 'https://a.example/anthropic', claudeApiKey: 'ak'
-  });
-  assert.strictEqual(cfg.activeProxyProfile, '中转A');
-  assert.strictEqual(cfg.codex.baseUrl, 'https://a.example/v1');
-  assert.strictEqual(cfg.codex.apiKey, 'oa');
-  assert.strictEqual(cfg.claude.baseUrl, 'https://a.example/anthropic');
-  assert.strictEqual(cfg.claude.apiKey, 'ak');
-
-  const updated = upsertProxyProfile([], { name: '中转A', codexBaseUrl: 'https://new/v1' });
-  assert.strictEqual(updated.length, 1);
-  assert.strictEqual(updated[0].codexBaseUrl, 'https://new/v1');
-  assert.deepStrictEqual(removeProxyProfile(updated, '中转A'), []);
 
   const env = buildScanEnv({ npmPrefix: 'D:\\ai-cli-tools\\npm-global' }, { PATH: 'C:\\Windows\\System32' });
   assert.ok(env.PATH.startsWith('D:\\ai-cli-tools\\npm-global;'));

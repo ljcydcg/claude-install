@@ -106,51 +106,6 @@ function buildProxyEnvLines(cfg) {
   return { cmd, sh };
 }
 
-function normalizeProxyProfile(profile) {
-  return {
-    name: String(profile?.name || '').trim(),
-    codexBaseUrl: String(profile?.codexBaseUrl || '').trim(),
-    codexApiKey: String(profile?.codexApiKey || ''),
-    claudeBaseUrl: String(profile?.claudeBaseUrl || '').trim(),
-    claudeApiKey: String(profile?.claudeApiKey || '')
-  };
-}
-
-function normalizeProxyProfiles(profiles) {
-  const seen = new Set();
-  const out = [];
-  for (const item of Array.isArray(profiles) ? profiles : []) {
-    const p = normalizeProxyProfile(item);
-    if (!p.name || seen.has(p.name)) continue;
-    seen.add(p.name);
-    out.push(p);
-  }
-  return out;
-}
-
-function applyProxyProfileToConfig(cfg, profile) {
-  const p = normalizeProxyProfile(profile);
-  return {
-    ...cfg,
-    activeProxyProfile: p.name,
-    codex: { ...(cfg.codex || {}), baseUrl: p.codexBaseUrl, apiKey: p.codexApiKey },
-    claude: { ...(cfg.claude || {}), baseUrl: p.claudeBaseUrl, apiKey: p.claudeApiKey }
-  };
-}
-
-function upsertProxyProfile(profiles, profile) {
-  const p = normalizeProxyProfile(profile);
-  if (!p.name) return normalizeProxyProfiles(profiles);
-  const current = normalizeProxyProfiles(profiles).filter(x => x.name !== p.name);
-  current.push(p);
-  return current;
-}
-
-function removeProxyProfile(profiles, name) {
-  const target = String(name || '').trim();
-  return normalizeProxyProfiles(profiles).filter(p => p.name !== target);
-}
-
 function buildClaudeSettings(existingSettings, cfg) {
   const settings = { ...(existingSettings && typeof existingSettings === 'object' ? existingSettings : {}) };
   const env = { ...(settings.env && typeof settings.env === 'object' ? settings.env : {}) };
@@ -345,10 +300,6 @@ module.exports = {
   buildToolStatus,
   buildScanEnv,
   buildProxyEnvLines,
-  normalizeProxyProfiles,
-  applyProxyProfileToConfig,
-  upsertProxyProfile,
-  removeProxyProfile,
   buildClaudeSettings,
   findCodexConfigTargets,
   writeCodexSettings,

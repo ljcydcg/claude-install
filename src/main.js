@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
-const { addPathEntries, buildNpmGlobalBinPath, buildToolStatus, buildScanEnv, buildProxyEnvLines, normalizeProxyProfiles, upsertProxyProfile, removeProxyProfile, applyProxyProfileToConfig, buildClaudeSettings, writeCodexSettings } = require('./scanner');
+const { addPathEntries, buildNpmGlobalBinPath, buildToolStatus, buildScanEnv, buildProxyEnvLines, buildClaudeSettings, writeCodexSettings } = require('./scanner');
 
 // 打包成单 exe 后，程序不能依赖 D:\\claude-install 这类开发机路径。
 // 用户配置和日志放到 Electron 的 userData 目录，确保换电脑也能直接运行。
@@ -19,11 +19,7 @@ const defaults = {
   installDir: DEFAULT_INSTALL_DIR,
   npmPrefix: path.join(DEFAULT_INSTALL_DIR, 'npm-global'),
   codex: { enabled: true, package: '@openai/codex', provider: 'rightcode', model: 'gpt-5.5', baseUrl: 'http://localhost:3000/v1', apiKey: '' },
-  claude: { enabled: true, package: '@anthropic-ai/claude-code', baseUrl: 'http://localhost:3000/v1', apiKey: '' },
-  activeProxyProfile: '本机 OpenClaw',
-  proxyProfiles: [
-    { name: '本机 OpenClaw', codexBaseUrl: 'http://localhost:3000/v1', codexApiKey: '', claudeBaseUrl: 'http://localhost:3000/v1', claudeApiKey: '' }
-  ]
+  claude: { enabled: true, package: '@anthropic-ai/claude-code', baseUrl: 'http://localhost:3000/v1', apiKey: '' }
 };
 
 function mergeConfig(cfg) {
@@ -31,8 +27,7 @@ function mergeConfig(cfg) {
     ...defaults,
     ...(cfg || {}),
     codex: { ...defaults.codex, ...((cfg || {}).codex || {}) },
-    claude: { ...defaults.claude, ...((cfg || {}).claude || {}) },
-    proxyProfiles: normalizeProxyProfiles((cfg || {}).proxyProfiles || defaults.proxyProfiles)
+    claude: { ...defaults.claude, ...((cfg || {}).claude || {}) }
   };
   return merged;
 }
@@ -277,30 +272,6 @@ async function ensureNodeEnvironment(env = process.env) {
 
 ipcMain.handle('config:get', () => readConfig());
 ipcMain.handle('config:save', (_, cfg) => { writeConfig(cfg); return readConfig(); });
-ipcMain.handle('proxy:save-profile', (_, cfg, profile) => {
-  const next = mergeConfig(cfg);
-  next.proxyProfiles = upsertProxyProfile(next.proxyProfiles, profile);
-  next.activeProxyProfile = profile.name;
-  writeConfig(next);
-  return readConfig();
-});
-ipcMain.handle('proxy:delete-profile', (_, cfg, name) => {
-  const next = mergeConfig(cfg);
-  next.proxyProfiles = removeProxyProfile(next.proxyProfiles, name);
-  if (next.activeProxyProfile === name) next.activeProxyProfile = next.proxyProfiles[0]?.name || '';
-  writeConfig(next);
-  return readConfig();
-});
-ipcMain.handle('proxy:apply-profile', async (_, cfg, name) => {
-  const current = mergeConfig(cfg);
-  const profile = current.proxyProfiles.find(p => p.name === name);
-  if (!profile) return { ok: false, error: `未找到中转配置：${name}`, config: current };
-  const next = applyProxyProfileToConfig(current, profile);
-  writeConfig(next);
-  await writeEnvFiles(next);
-  writeClaudeSettings(next);
-  return { ok: true, config: readConfig() };
-});
 ipcMain.handle('dialog:dir', async () => {
   const r = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'createDirectory'] });
   return r.canceled ? null : r.filePaths[0];
