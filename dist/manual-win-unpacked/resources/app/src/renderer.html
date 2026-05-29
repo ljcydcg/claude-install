@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Claude / Codex Manager</title>
 <style>
-:root{font-family:'Segoe UI',Arial,sans-serif;color:#e9eef7;background:#0f172a}body{margin:0}.wrap{max-width:980px;margin:0 auto;padding:28px}.card{background:#172033;border:1px solid #2a3854;border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 10px 30px #0004}h1{margin:0 0 6px;font-size:28px}.muted{color:#9fb0cc}.grid{display:grid;grid-template-columns:190px 1fr auto;gap:10px;align-items:center;margin:10px 0}input,select{background:#0b1220;color:#e9eef7;border:1px solid #33415f;border-radius:10px;padding:10px;font-size:14px}input[type=checkbox]{width:18px;height:18px}.btn{background:#2563eb;color:white;border:0;border-radius:10px;padding:10px 14px;cursor:pointer;font-weight:700}.btn:hover{background:#1d4ed8}.btn.secondary{background:#334155}.btn.danger{background:#b45309}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.tool{border:1px solid #33415f;border-radius:14px;padding:14px;margin-top:12px}.log{white-space:pre-wrap;background:#020617;border:1px solid #33415f;border-radius:12px;padding:12px;height:210px;overflow:auto;color:#cbd5e1}code{background:#0b1220;padding:2px 6px;border-radius:6px}.ok{color:#86efac}.warn{color:#fbbf24}.bad{color:#fca5a5}.pill{display:inline-block;border:1px solid #33415f;border-radius:999px;padding:3px 9px;background:#0b1220;font-size:12px}</style>
+:root{font-family:'Segoe UI',Arial,sans-serif;color:#e9eef7;background:#0f172a}body{margin:0}.wrap{max-width:980px;margin:0 auto;padding:28px}.card{background:#172033;border:1px solid #2a3854;border-radius:16px;padding:20px;margin:16px 0;box-shadow:0 10px 30px #0004}h1{margin:0 0 6px;font-size:28px}.muted{color:#9fb0cc}.grid{display:grid;grid-template-columns:190px 1fr auto;gap:10px;align-items:center;margin:10px 0}input,select,textarea{background:#0b1220;color:#e9eef7;border:1px solid #33415f;border-radius:10px;padding:10px;font-size:14px}textarea{font-family:Consolas,'Courier New',monospace;line-height:1.45;resize:vertical}.templateBox{min-height:170px;white-space:pre}input[type=checkbox]{width:18px;height:18px}.btn{background:#2563eb;color:white;border:0;border-radius:10px;padding:10px 14px;cursor:pointer;font-weight:700}.btn:hover{background:#1d4ed8}.btn.secondary{background:#334155}.btn.danger{background:#b45309}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.tool{border:1px solid #33415f;border-radius:14px;padding:14px;margin-top:12px}.hidden{display:none!important}.log{white-space:pre-wrap;background:#020617;border:1px solid #33415f;border-radius:12px;padding:12px;height:210px;overflow:auto;color:#cbd5e1}code{background:#0b1220;padding:2px 6px;border-radius:6px}.ok{color:#86efac}.warn{color:#fbbf24}.bad{color:#fca5a5}.pill{display:inline-block;border:1px solid #33415f;border-radius:999px;padding:3px 9px;background:#0b1220;font-size:12px}</style>
 </head>
 <body>
 <div class="wrap">
@@ -21,8 +21,9 @@
 
   <div class="card">
     <h2>2. Codex / Claude Code API 配置</h2>
-    <p class="muted">这里就是修改 API 配置的位置：分别填写 Codex 和 Claude Code 的 <code>base_url</code> 与 <code>key</code>，点击“保存并应用当前 API 配置”后会写入配置文件并重新生成环境脚本。</p>
-    <div class="tool">
+    <p class="muted">选择要配置的 CLI，然后填写对应的 <code>base_url</code> 与 <code>key</code>。</p>
+    <div class="grid"><label>配置对象</label><select id="apiToolSelect" onchange="showApiToolConfig()"><option value="codex">Codex CLI</option><option value="claude">Claude Code</option></select><span></span></div>
+    <div id="codexConfigPanel" class="tool">
       <div class="row"><input id="codexEnabled" type="checkbox"><b>Codex CLI API 配置</b><span class="muted">npm 包：@openai/codex</span><span id="codexStatus" class="pill muted">待扫描</span></div>
       <div class="grid"><label>Package</label><input id="codexPackage" /><span></span></div>
       <div class="grid"><label>Codex Provider</label><input id="codexProvider" placeholder="例如：rightcode" /><span></span></div>
@@ -30,13 +31,15 @@
       <div class="grid"><label>Codex Base URL</label><input id="codexBaseUrl" placeholder="例如：http://localhost:3000/v1" /><span></span></div>
       <div class="grid"><label>Codex API Key</label><input id="codexApiKey" type="password" placeholder="填写 Codex 使用的 OPENAI_API_KEY" /><button class="btn secondary" onclick="toggleSecret('codexApiKey')">显示/隐藏</button></div>
       <div class="grid"><label>安装位置</label><input id="codexPath" readonly placeholder="启动后自动扫描" /><span></span></div>
+      <div class="grid"><label>配置文件模板</label><textarea id="codexConfigTemplate" class="templateBox" spellcheck="false" placeholder="{{provider}} {{model}} {{baseUrl}} {{apiKey}}"></textarea><span></span></div>
     </div>
-    <div class="tool">
+    <div id="claudeConfigPanel" class="tool hidden">
       <div class="row"><input id="claudeEnabled" type="checkbox"><b>Claude Code API 配置</b><span class="muted">npm 包：@anthropic-ai/claude-code</span><span id="claudeStatus" class="pill muted">待扫描</span></div>
       <div class="grid"><label>Package</label><input id="claudePackage" /><span></span></div>
       <div class="grid"><label>Claude Base URL</label><input id="claudeBaseUrl" placeholder="例如：http://localhost:3000/v1" /><span></span></div>
       <div class="grid"><label>Claude API Key</label><input id="claudeApiKey" type="password" placeholder="填写 Claude Code 使用的 ANTHROPIC_API_KEY" /><button class="btn secondary" onclick="toggleSecret('claudeApiKey')">显示/隐藏</button></div>
       <div class="grid"><label>安装位置</label><input id="claudePath" readonly placeholder="启动后自动扫描" /><span></span></div>
+      <div class="grid"><label>配置文件模板</label><textarea id="claudeConfigTemplate" class="templateBox" spellcheck="false" placeholder="{{baseUrl}} {{apiKey}}"></textarea><span></span></div>
     </div>
     <div class="row">
       <button class="btn" onclick="applyConfig()">保存并应用当前 API 配置</button>
@@ -68,21 +71,22 @@ const $=id=>document.getElementById(id);
 function log(s){ $('log').textContent += s; $('log').scrollTop=$('log').scrollHeight; }
 function readForm(){ return {
  installDir:$('installDir').value, npmPrefix:$('npmPrefix').value,
- codex:{enabled:$('codexEnabled').checked, package:$('codexPackage').value, provider:$('codexProvider').value, model:$('codexModel').value, baseUrl:$('codexBaseUrl').value, apiKey:$('codexApiKey').value},
- claude:{enabled:$('claudeEnabled').checked, package:$('claudePackage').value, baseUrl:$('claudeBaseUrl').value, apiKey:$('claudeApiKey').value}
+ codex:{enabled:$('codexEnabled').checked, package:$('codexPackage').value, provider:$('codexProvider').value, model:$('codexModel').value, baseUrl:$('codexBaseUrl').value, apiKey:$('codexApiKey').value, configTemplate:$('codexConfigTemplate').value},
+ claude:{enabled:$('claudeEnabled').checked, package:$('claudePackage').value, baseUrl:$('claudeBaseUrl').value, apiKey:$('claudeApiKey').value, configTemplate:$('claudeConfigTemplate').value}
 };}
-function fill(c){ cfg=c; $('installDir').value=c.installDir; $('npmPrefix').value=c.npmPrefix; $('codexEnabled').checked=c.codex.enabled; $('codexPackage').value=c.codex.package; $('codexProvider').value=c.codex.provider||'rightcode'; $('codexModel').value=c.codex.model||'gpt-5.5'; $('codexBaseUrl').value=c.codex.baseUrl; $('codexApiKey').value=c.codex.apiKey||''; $('claudeEnabled').checked=c.claude.enabled; $('claudePackage').value=c.claude.package; $('claudeBaseUrl').value=c.claude.baseUrl; $('claudeApiKey').value=c.claude.apiKey||''; }
+function fill(c){ cfg=c; $('installDir').value=c.installDir; $('npmPrefix').value=c.npmPrefix; $('codexEnabled').checked=c.codex.enabled; $('codexPackage').value=c.codex.package; $('codexProvider').value=c.codex.provider||'rightcode'; $('codexModel').value=c.codex.model||'gpt-5.5'; $('codexBaseUrl').value=c.codex.baseUrl; $('codexApiKey').value=c.codex.apiKey||''; $('codexConfigTemplate').value=c.codex.configTemplate||''; $('claudeEnabled').checked=c.claude.enabled; $('claudePackage').value=c.claude.package; $('claudeBaseUrl').value=c.claude.baseUrl; $('claudeApiKey').value=c.claude.apiKey||''; $('claudeConfigTemplate').value=c.claude.configTemplate||''; }
 function renderToolStatus(id, info){ const el=$(id+'Status'); if(!el||!info)return; el.className='pill '+(info.installed?'ok':'bad'); el.textContent=info.installed?('已安装：'+info.version):'未检测到'; el.title=info.output||''; const pathEl=$(id+'Path'); if(pathEl) pathEl.value=info.installPath||'未检测到'; }
+function showApiToolConfig(){ const selected=$('apiToolSelect').value; $('codexConfigPanel').classList.toggle('hidden', selected!=='codex'); $('claudeConfigPanel').classList.toggle('hidden', selected!=='claude'); }
 function toggleSecret(id){ const el=$(id); el.type=el.type==='password'?'text':'password'; }
 async function scanTools(){ $('status').innerHTML='<span class="warn">正在扫描 Codex / Claude Code 安装状态...</span>'; const r=await window.api.scanTools(readForm()); renderToolStatus('codex', r.codex); renderToolStatus('claude', r.claude); $('status').innerHTML='<span class="ok">扫描完成</span> <span class="muted">'+new Date(r.scannedAt).toLocaleString()+'</span>'; log('\n=== AUTO SCAN ===\n'+JSON.stringify(r,null,2)+'\n'); return r; }
 async function pick(id){ const d=await window.api.chooseDir(); if(d) $(id).value=d; }
 async function save(){ cfg=await window.api.saveConfig(readForm()); $('status').innerHTML='<span class="ok">配置已保存</span>'; }
-async function applyConfig(){ await save(); await window.api.applyConfig(readForm()); $('status').innerHTML='<span class="ok">当前 Codex / Claude Code API 配置已保存并应用；Codex config.toml/auth.json、环境脚本和 Claude Code 配置文件均已更新</span>'; }
-async function installAll(){ await save(); $('status').innerHTML='<span class="warn">正在安装，请等待 npm 输出...</span>'; log('\n=== INSTALL START ===\n'); const r=await window.api.installAll(readForm()); log('\n=== RESULT ===\n'+JSON.stringify(r,null,2)+'\n'); $('status').innerHTML='<span class="ok">安装流程结束，正在重新扫描...</span>'; await scanTools(); }
+async function applyConfig(){ try{ await save(); await window.api.applyConfig(readForm()); $('status').innerHTML='<span class="ok">当前 Codex / Claude Code API 配置已保存并应用；Codex config.toml/auth.json、环境脚本和 Claude Code 配置文件均已更新</span>'; }catch(e){ $('status').innerHTML='<span class="bad">配置应用失败：'+(e&&e.message?e.message:e)+'</span>'; log('\n=== APPLY ERROR ===\n'+(e&&e.stack?e.stack:e)+'\n'); } }
+async function installAll(){ try{ await save(); $('status').innerHTML='<span class="warn">正在安装，请等待 npm 输出...</span>'; log('\n=== INSTALL START ===\n'); const r=await window.api.installAll(readForm()); log('\n=== RESULT ===\n'+JSON.stringify(r,null,2)+'\n'); $('status').innerHTML='<span class="ok">安装流程结束，正在重新扫描...</span>'; await scanTools(); }catch(e){ $('status').innerHTML='<span class="bad">安装流程失败：'+(e&&e.message?e.message:e)+'</span>'; log('\n=== INSTALL ERROR ===\n'+(e&&e.stack?e.stack:e)+'\n'); } }
 async function checkVersions(){ await save(); log('\n=== VERSION CHECK ===\n'); const r=await window.api.checkVersions(readForm()); renderToolStatus('codex', r.codex); renderToolStatus('claude', r.claude); log(JSON.stringify(r,null,2)+'\n'); }
 async function loadLog(){ $('log').textContent=await window.api.readLog(); }
 window.api.onLog(log);
-window.api.getConfig().then(c=>{ fill(c); scanTools(); });
+window.api.getConfig().then(c=>{ fill(c); showApiToolConfig(); scanTools(); });
 </script>
 </body>
 </html>

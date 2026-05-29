@@ -1,5 +1,8 @@
 const assert = require('assert');
-const { addPathEntries, buildNpmGlobalBinPath, buildToolStatus, buildScanEnv, buildProxyEnvLines, buildClaudeSettings } = require('../src/scanner');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { addPathEntries, buildNpmGlobalBinPath, buildToolStatus, buildScanEnv, buildProxyEnvLines, buildClaudeSettings, writeCodexSettings } = require('../src/scanner');
 
 function run() {
   const installed = buildToolStatus('codex', { code: 0, output: 'codex-cli 1.2.3\n' }, { code: 0, output: 'D:\\ai-cli-tools\\npm-global\\codex.cmd\n' });
@@ -52,6 +55,39 @@ function run() {
   assert.strictEqual(claudeSettings.env.ANTHROPIC_BASE_URL, 'https://proxy.example/anthropic');
   assert.strictEqual(claudeSettings.env.ANTHROPIC_API_KEY, 'sk-claude-real');
   assert.strictEqual(claudeSettings.env.ANTHROPIC_AUTH_TOKEN, 'sk-claude-real');
+
+  const customClaudeSettings = buildClaudeSettings({}, {
+    claude: {
+      baseUrl: 'https://custom.example/anthropic',
+      apiKey: 'sk-custom',
+      configTemplate: '{ "env": { "ANTHROPIC_BASE_URL": "{{baseUrl}}", "CUSTOM_TOKEN": "{{apiKey}}" }, "permissions": { "allow": ["Bash(node --version)"] } }'
+    }
+  });
+  assert.strictEqual(customClaudeSettings.env.ANTHROPIC_BASE_URL, 'https://custom.example/anthropic');
+  assert.strictEqual(customClaudeSettings.env.CUSTOM_TOKEN, 'sk-custom');
+  assert.deepStrictEqual(customClaudeSettings.permissions.allow, ['Bash(node --version)']);
+
+  const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-template-test-'));
+  try {
+    const written = writeCodexSettings({
+      codex: {
+        provider: 'deepseek',
+        model: 'deepseek-chat',
+        baseUrl: 'https://api.deepseek.com',
+        apiKey: 'sk-codex-template',
+        configTemplate: '[model_providers.{{provider}}]\nname = "{{provider}}"\nbase_url = "{{baseUrl}}"\nwire_api = "chat"\nrequires_openai_auth = true\n'
+      }
+    }, { CODEX_HOME: codexHome, USERPROFILE: codexHome });
+    assert.strictEqual(written.length, 1);
+    assert.strictEqual(written[0].ok, true);
+    const text = fs.readFileSync(path.join(codexHome, 'config.toml'), 'utf8');
+    assert.ok(text.includes('model_provider = "deepseek"'));
+    assert.ok(text.includes('model = "deepseek-chat"'));
+    assert.ok(text.includes('wire_api = "chat"'));
+    assert.ok(text.includes('base_url = "https://api.deepseek.com"'));
+  } finally {
+    fs.rmSync(codexHome, { recursive: true, force: true });
+  }
 }
 
 run();

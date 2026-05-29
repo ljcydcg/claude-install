@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
-const { addPathEntries, buildNpmGlobalBinPath, buildToolStatus, buildScanEnv, buildProxyEnvLines, buildClaudeSettings, writeCodexSettings } = require('./scanner');
+const { addPathEntries, buildNpmGlobalBinPath, buildToolStatus, buildScanEnv, buildProxyEnvLines, defaultCodexConfigTemplate, defaultClaudeConfigTemplate, buildClaudeSettings, writeCodexSettings } = require('./scanner');
 
 // 打包成单 exe 后，程序不能依赖 D:\\claude-install 这类开发机路径。
 // 用户配置和日志放到 Electron 的 userData 目录，确保换电脑也能直接运行。
@@ -18,8 +18,8 @@ const DEFAULT_INSTALL_DIR = path.join(os.homedir(), 'ai-cli-tools');
 const defaults = {
   installDir: DEFAULT_INSTALL_DIR,
   npmPrefix: path.join(DEFAULT_INSTALL_DIR, 'npm-global'),
-  codex: { enabled: true, package: '@openai/codex', provider: 'rightcode', model: 'gpt-5.5', baseUrl: 'http://localhost:3000/v1', apiKey: '' },
-  claude: { enabled: true, package: '@anthropic-ai/claude-code', baseUrl: 'http://localhost:3000/v1', apiKey: '' }
+  codex: { enabled: true, package: '@openai/codex', provider: 'rightcode', model: 'gpt-5.5', baseUrl: 'http://localhost:3000/v1', apiKey: '', configTemplate: defaultCodexConfigTemplate() },
+  claude: { enabled: true, package: '@anthropic-ai/claude-code', baseUrl: 'http://localhost:3000/v1', apiKey: '', configTemplate: defaultClaudeConfigTemplate() }
 };
 
 function mergeConfig(cfg) {

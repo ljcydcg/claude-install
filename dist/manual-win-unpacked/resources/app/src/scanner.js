@@ -2,6 +2,21 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+const DEFAULT_CODEX_CONFIG_TEMPLATE = `[model_providers.{{provider}}]
+name = "{{provider}}"
+base_url = "{{baseUrl}}"
+wire_api = "responses"
+requires_openai_auth = true
+`;
+
+const DEFAULT_CLAUDE_CONFIG_TEMPLATE = `{
+  "env": {
+    "ANTHROPIC_BASE_URL": "{{baseUrl}}",
+    "ANTHROPIC_API_KEY": "{{apiKey}}",
+    "ANTHROPIC_AUTH_TOKEN": "{{apiKey}}"
+  }
+}`;
+
 function trimOutput(output) {
   return String(output || '').trim();
 }
@@ -106,16 +121,50 @@ function buildProxyEnvLines(cfg) {
   return { cmd, sh };
 }
 
+function defaultCodexConfigTemplate() {
+  return DEFAULT_CODEX_CONFIG_TEMPLATE;
+}
+
+function defaultClaudeConfigTemplate() {
+  return DEFAULT_CLAUDE_CONFIG_TEMPLATE;
+}
+
+function escapeConfigTemplateValue(value) {
+  return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function renderConfigTemplate(template, values) {
+  const data = {};
+  for (const [key, value] of Object.entries(values || {})) {
+    data[key] = escapeConfigTemplateValue(value);
+  }
+  return String(template || '').replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (_, key) => data[key] ?? '');
+}
+
+function mergeSettings(target, source) {
+  const out = { ...(target && typeof target === 'object' && !Array.isArray(target) ? target : {}) };
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return out;
+  for (const [key, value] of Object.entries(source)) {
+    if (value === '') continue;
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      out[key] = mergeSettings(out[key], value);
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
 function buildClaudeSettings(existingSettings, cfg) {
   const settings = { ...(existingSettings && typeof existingSettings === 'object' ? existingSettings : {}) };
-  const env = { ...(settings.env && typeof settings.env === 'object' ? settings.env : {}) };
-  if (cfg.claude?.baseUrl) env.ANTHROPIC_BASE_URL = cfg.claude.baseUrl;
-  if (cfg.claude?.apiKey) {
-    env.ANTHROPIC_API_KEY = cfg.claude.apiKey;
-    env.ANTHROPIC_AUTH_TOKEN = cfg.claude.apiKey;
-  }
-  settings.env = env;
-  return settings;
+  const claude = cfg.claude || {};
+  const template = claude.configTemplate || defaultClaudeConfigTemplate();
+  const rendered = renderConfigTemplate(template, {
+    baseUrl: claude.baseUrl || '',
+    apiKey: claude.apiKey || ''
+  });
+  const parsed = JSON.parse(rendered);
+  return mergeSettings(settings, parsed);
 }
 
 function nowStamp() {
@@ -192,7 +241,8 @@ function codexHomeCandidates(env = process.env) {
   const raw = [];
   if (env.CODEX_HOME) raw.push(path.join(env.CODEX_HOME, 'config.toml'));
   if (env.OPENAI_CODEX_HOME) raw.push(path.join(env.OPENAI_CODEX_HOME, 'config.toml'));
-  for (const home of [env.USERPROFILE, env.HOME, os.homedir()].filter(Boolean)) raw.push(path.join(home, '.codex', 'config.toml'));
+  const envHomes = [env.USERPROFILE, env.HOME].filter(Boolean);
+  for (const home of (envHomes.length ? envHomes : [os.homedir()])) raw.push(path.join(home, '.codex', 'config.toml'));
   if (env.APPDATA) {
     raw.push(path.join(env.APPDATA, 'Codex', 'config.toml'));
     raw.push(path.join(env.APPDATA, 'codex', 'config.toml'));
@@ -214,6 +264,8 @@ function findCodexConfigTargets(env = process.env) {
   const candidates = codexHomeCandidates(env);
   const existing = candidates.filter(p => fs.existsSync(p));
   if (existing.length) return existing;
+  if (env.CODEX_HOME) return [path.join(env.CODEX_HOME, 'config.toml')];
+  if (env.OPENAI_CODEX_HOME) return [path.join(env.OPENAI_CODEX_HOME, 'config.toml')];
   const home = env.USERPROFILE || env.HOME || os.homedir();
   return [path.join(home, '.codex', 'config.toml')];
 }
@@ -223,6 +275,7 @@ function writeCodexProxyConfig(configPath, cfg) {
   const provider = String(codex.provider || 'rightcode').trim() || 'rightcode';
   const model = String(codex.model || 'gpt-5.5').trim() || 'gpt-5.5';
   const baseUrl = String(codex.baseUrl || '').trim();
+  const template = String(codex.configTemplate || defaultCodexConfigTemplate());
   if (!baseUrl) throw new Error('Codex Base URL 不能为空');
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   let text = '';
@@ -233,7 +286,13 @@ function writeCodexProxyConfig(configPath, cfg) {
   text = removeCodexProviderSection(text, provider);
   text = setOrPrependRootKey(text, 'model_provider', tomlQuote(provider));
   text = setOrPrependRootKey(text, 'model', tomlQuote(model));
-  text = `${text.trimEnd()}\n\n[model_providers.${provider}]\nname = ${tomlQuote(provider)}\nbase_url = ${tomlQuote(baseUrl)}\nwire_api = "responses"\nrequires_openai_auth = true\n`;
+  const rendered = renderConfigTemplate(template, {
+    provider,
+    model,
+    baseUrl,
+    apiKey: String((cfg.codex || {}).apiKey || '')
+  }).trim();
+  text = `${text.trimEnd()}\n\n${rendered}\n`;
   fs.writeFileSync(configPath, text, 'utf8');
   return { configPath, provider, model, baseUrl };
 }
@@ -269,7 +328,6 @@ function verifyCodexConfig(configPath, cfg) {
   if (!text.includes(`model_provider = "${provider}"`)) missing.push('model_provider');
   if (!text.includes(`model = "${model}"`)) missing.push('model');
   if (!text.includes(`base_url = "${baseUrl}"`)) missing.push('base_url');
-  if (!text.includes('wire_api = "responses"')) missing.push('wire_api');
   return { ok: missing.length === 0, message: missing.length ? `config.toml 校验失败：${missing.join(', ')}` : 'config.toml 已写入并读回校验成功' };
 }
 
@@ -300,6 +358,8 @@ module.exports = {
   buildToolStatus,
   buildScanEnv,
   buildProxyEnvLines,
+  defaultCodexConfigTemplate,
+  defaultClaudeConfigTemplate,
   buildClaudeSettings,
   findCodexConfigTargets,
   writeCodexSettings,
