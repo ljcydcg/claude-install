@@ -21,6 +21,9 @@ const defaults = {
   codex: { enabled: true, package: '@openai/codex', provider: 'rightcode', model: 'gpt-5.5', baseUrl: 'http://localhost:3000/v1', apiKey: '', configTemplate: defaultCodexConfigTemplate() },
   claude: { enabled: true, package: '@anthropic-ai/claude-code', baseUrl: 'http://localhost:3000/v1', apiKey: '', configTemplate: defaultClaudeConfigTemplate() }
 };
+const WINGET_INSTALLER_URL = 'https://aka.ms/getwinget';
+const WINGET_USTC_SOURCE_NAME = 'ustc';
+const WINGET_USTC_SOURCE_URL = 'https://mirrors.ustc.edu.cn/winget-source';
 
 function mergeConfig(cfg) {
   const merged = {
@@ -49,9 +52,9 @@ function writeClaudeSettings(cfg) {
   appendLog(`WROTE Claude Code settings ${CLAUDE_SETTINGS}`);
   return CLAUDE_SETTINGS;
 }
-function writeCodexCliSettings(cfg) {
+function writeCodexCliSettings(cfg, force = false) {
   const merged = mergeConfig(cfg);
-  if (!merged.codex?.enabled) return [];
+  if (!force && !merged.codex?.enabled) return [];
   const results = writeCodexSettings(merged);
   for (const r of results) {
     appendLog(`WROTE Codex config ${r.configPath}`);
@@ -60,8 +63,18 @@ function writeCodexCliSettings(cfg) {
   }
   return results;
 }
+function normalizeApiTool(tool) {
+  return tool === 'claude' ? 'claude' : 'codex';
+}
+function writeSelectedApiConfig(cfg, tool) {
+  const merged = mergeConfig(cfg);
+  const selected = normalizeApiTool(tool);
+  if (selected === 'claude') return { tool: selected, settingsPath: writeClaudeSettings(merged) };
+  return { tool: selected, results: writeCodexCliSettings(merged, true) };
+}
 function appendLog(s) { fs.appendFileSync(LOG, `[${new Date().toISOString()}] ${s}\n`, 'utf8'); }
 function redact(s) { return String(s || '').replace(/(sk-[A-Za-z0-9_-]{8,})/g, 'sk-***').replace(/(Bearer\s+)[^\s]+/g, '$1***'); }
+function tailOutput(result, limit = 1600) { return String(result?.output || '').trim().slice(-limit); }
 
 let mainWindow;
 function createWindow() {
@@ -111,6 +124,19 @@ function addToCurrentProcessPath(entry) {
   process.env[pathKey] = addPathEntries(process.env[pathKey] || '', [entry]);
 }
 
+function withPathEntries(env = process.env, entries = []) {
+  const pathKey = Object.keys(env).find(k => k.toLowerCase() === 'path') || 'Path';
+  return { ...env, [pathKey]: addPathEntries(env[pathKey] || '', entries) };
+}
+
+function commonWindowsAppsPath() {
+  return path.join(os.homedir(), 'AppData', 'Local', 'Microsoft', 'WindowsApps');
+}
+
+function withCommonWingetPath(env = process.env) {
+  return process.platform === 'win32' ? withPathEntries(env, [commonWindowsAppsPath()]) : env;
+}
+
 function powershellPath() {
   const systemRoot = process.env.SystemRoot || 'C:\\Windows';
   return path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
@@ -127,6 +153,195 @@ async function runPowerShell(script) {
     ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
     { logArgs: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', '<encoded>'] }
   );
+}
+
+async function getWingetStatus(env = process.env) {
+  const checkEnv = withCommonWingetPath(env);
+  const winget = await commandOk('winget', ['--version'], { env: checkEnv });
+  return { ...winget, env: checkEnv };
+}
+
+async function showWingetInstallFailureDialog(detail) {
+  const message = '无法自动安装 winget';
+  const body = [
+    String(detail || '当前系统不支持自动安装，或下载安装 App Installer 失败。').trim(),
+    '',
+    `可以手动安装 App Installer / winget：${WINGET_INSTALLER_URL}`,
+    `winget 可用后，程序会优先尝试使用国内源：${WINGET_USTC_SOURCE_URL}`
+  ].join('\n');
+  appendLog(`WINGET INSTALL FAILED: ${redact(body)}`);
+  try {
+    await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      title: message,
+      message,
+      detail: body,
+      buttons: ['知道了']
+    });
+  } catch {}
+}
+
+async function installWingetWithAppInstaller() {
+  if (process.platform !== 'win32') {
+    return { code: -1, output: 'winget 自动安装仅支持 Windows。' };
+  }
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "$ProgressPreference = 'SilentlyContinue'",
+    "if (-not (Get-Command Add-AppxPackage -ErrorAction SilentlyContinue)) { throw '当前系统不支持 Add-AppxPackage，无法自动安装 winget。' }",
+    "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}",
+    `$installerUrl = ${psString(WINGET_INSTALLER_URL)}`,
+    "$tempDir = Join-Path $env:TEMP 'ClaudeCodexManager'",
+    "New-Item -ItemType Directory -Force -Path $tempDir | Out-Null",
+    "$bundle = Join-Path $tempDir 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle'",
+    "Invoke-WebRequest -Uri $installerUrl -OutFile $bundle -UseBasicParsing",
+    "Add-AppxPackage -Path $bundle",
+    "Write-Output \"winget installer installed from $installerUrl\""
+  ].join('\n');
+  return runPowerShell(script);
+}
+
+async function registerWingetIfAppInstallerPresent() {
+  if (process.platform !== 'win32') {
+    return { code: -1, output: 'winget 注册仅支持 Windows。' };
+  }
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "if (-not (Get-Command Add-AppxPackage -ErrorAction SilentlyContinue)) { throw '当前系统不支持 Add-AppxPackage，无法注册 winget。' }",
+    "Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe",
+    "Write-Output 'requested winget registration for Microsoft.DesktopAppInstaller_8wekyb3d8bbwe'"
+  ].join('\n');
+  return runPowerShell(script);
+}
+
+function findWingetSourceName(output, sourceUrl) {
+  const url = String(sourceUrl || '').toLowerCase();
+  if (!url) return null;
+  for (const line of String(output || '').split(/\r?\n/)) {
+    if (!line.toLowerCase().includes(url)) continue;
+    const name = line.trim().split(/\s+/)[0];
+    if (name) return name;
+  }
+  return null;
+}
+
+async function ensureWingetDomesticSource(env = process.env) {
+  mainWindow?.webContents.send('log', `\n=== WINGET SOURCE CHECK ===\n尝试配置国内镜像源：${WINGET_USTC_SOURCE_URL}\n`);
+  const list = await runCommand('winget', ['source', 'list'], { env });
+  const existingSourceName = findWingetSourceName(list.output, WINGET_USTC_SOURCE_URL);
+  if (list.code === 0 && existingSourceName) {
+    return { ok: true, sourceName: existingSourceName, output: list.output, list };
+  }
+
+  const addTrusted = await runCommand('winget', [
+    'source',
+    'add',
+    '--name',
+    WINGET_USTC_SOURCE_NAME,
+    '--arg',
+    WINGET_USTC_SOURCE_URL,
+    '--trust-level',
+    'trusted',
+    '--accept-source-agreements'
+  ], { env });
+
+  let addLegacy = null;
+  if (addTrusted.code !== 0) {
+    addLegacy = await runCommand('winget', [
+      'source',
+      'add',
+      '--name',
+      WINGET_USTC_SOURCE_NAME,
+      '--arg',
+      WINGET_USTC_SOURCE_URL,
+      '--accept-source-agreements'
+    ], { env });
+  }
+
+  let addMinimal = null;
+  if (addTrusted.code !== 0 && addLegacy?.code !== 0) {
+    addMinimal = await runCommand('winget', [
+      'source',
+      'add',
+      WINGET_USTC_SOURCE_NAME,
+      WINGET_USTC_SOURCE_URL
+    ], { env });
+  }
+
+  const addOk = addTrusted.code === 0 || addLegacy?.code === 0 || addMinimal?.code === 0;
+  const update = addOk
+    ? await runCommand('winget', ['source', 'update', '--name', WINGET_USTC_SOURCE_NAME], { env })
+    : { code: -1, output: 'skip winget source update because source add failed' };
+  const finalList = await runCommand('winget', ['source', 'list'], { env });
+  const finalSourceName = findWingetSourceName(finalList.output, WINGET_USTC_SOURCE_URL);
+  const ok = finalList.code === 0 && !!finalSourceName;
+  const output = [
+    `source list: ${list.code}`,
+    tailOutput(list, 600),
+    `source add trusted: ${addTrusted.code}`,
+    tailOutput(addTrusted, 600),
+    addLegacy ? `source add fallback: ${addLegacy.code}\n${tailOutput(addLegacy, 600)}` : '',
+    addMinimal ? `source add minimal: ${addMinimal.code}\n${tailOutput(addMinimal, 600)}` : '',
+    `source update: ${update.code}`,
+    tailOutput(update, 600),
+    `source list final: ${finalList.code}`,
+    tailOutput(finalList, 600)
+  ].filter(Boolean).join('\n');
+  if (!ok) {
+    mainWindow?.webContents.send('log', '\n国内镜像源配置失败，将回退使用 winget 默认源。\n');
+  }
+  return { ok, sourceName: ok ? finalSourceName : null, output, list, addTrusted, addLegacy, addMinimal, update, finalList };
+}
+
+async function ensureWingetAvailable(options = {}) {
+  const showDialog = options.showDialog !== false;
+  mainWindow?.webContents.send('log', '\n=== WINGET CHECK ===\n');
+  if (process.platform !== 'win32') {
+    const error = 'winget 仅支持 Windows，当前系统无法自动安装 winget。';
+    if (showDialog) await showWingetInstallFailureDialog(error);
+    return { ok: false, error, env: process.env };
+  }
+
+  let winget = await getWingetStatus(process.env);
+  mainWindow?.webContents.send('log', `winget: ${winget.ok ? winget.output.trim() : '未检测到'}\n`);
+  if (!winget.ok) {
+    mainWindow?.webContents.send('log', '\n未检测到 winget，先尝试注册系统中的 App Installer...\n');
+    const register = await registerWingetIfAppInstallerPresent();
+    if (register.code === 0) {
+      addToCurrentProcessPath(commonWindowsAppsPath());
+      winget = await getWingetStatus(process.env);
+      mainWindow?.webContents.send('log', `winget 注册后检测：${winget.ok ? winget.output.trim() : '仍未检测到'}\n`);
+      if (winget.ok) {
+        const mirror = await ensureWingetDomesticSource(winget.env);
+        return { ok: true, installed: false, registered: true, winget, register, mirror, env: winget.env };
+      }
+    }
+
+    mainWindow?.webContents.send('log', '\n注册后仍未检测到 winget，开始尝试安装 App Installer / winget...\n');
+    appendLog('WINGET MISSING: installing App Installer');
+    const install = await installWingetWithAppInstaller();
+    if (install.code !== 0) {
+      const error = `winget 自动安装失败，退出码 ${install.code}`;
+      if (showDialog) await showWingetInstallFailureDialog(`${error}\n${tailOutput(install)}`);
+      return { ok: false, error, winget, register, install, env: winget.env };
+    }
+
+    addToCurrentProcessPath(commonWindowsAppsPath());
+    winget = await getWingetStatus(process.env);
+    mainWindow?.webContents.send('log', '\n=== WINGET RECHECK ===\n');
+    mainWindow?.webContents.send('log', `winget: ${winget.ok ? winget.output.trim() : '安装后仍未检测到'}\n`);
+    if (!winget.ok) {
+      const error = 'winget 安装后仍未在当前进程 PATH 中检测到；请重启桌面程序后再点安装。';
+      if (showDialog) await showWingetInstallFailureDialog(`${error}\n${tailOutput(winget)}`);
+      return { ok: false, error, winget, register, install, env: winget.env };
+    }
+
+    const mirror = await ensureWingetDomesticSource(winget.env);
+    return { ok: true, installed: true, winget, register, install, mirror, env: winget.env };
+  }
+
+  const mirror = await ensureWingetDomesticSource(winget.env);
+  return { ok: true, installed: false, winget, mirror, env: winget.env };
 }
 
 async function ensureUserPathEntry(entry) {
@@ -234,7 +449,7 @@ async function getNodeEnvironmentStatus(env = process.env) {
   return { ok: node.ok && npm.ok, node, npm, env: checkEnv };
 }
 
-async function ensureNodeEnvironment(env = process.env) {
+async function ensureNodeEnvironment(env = process.env, wingetStatus = null) {
   mainWindow?.webContents.send('log', '\n=== NODE ENV CHECK ===\n');
   let status = await getNodeEnvironmentStatus(env);
   mainWindow?.webContents.send('log', `node: ${status.node.ok ? status.node.output.trim() : '未检测到'}\n`);
@@ -244,18 +459,23 @@ async function ensureNodeEnvironment(env = process.env) {
 
   mainWindow?.webContents.send('log', '\n未检测到完整 Node.js/npm 环境，开始执行 Node.js LTS 安装指令...\n');
   appendLog('NODE MISSING: installing OpenJS.NodeJS.LTS via winget');
-  const winget = await commandOk('winget', ['--version']);
+  const winget = wingetStatus || await ensureWingetAvailable({ showDialog: true });
   if (!winget.ok) {
-    return { ...status, ok: false, error: '未检测到 winget，无法自动安装 Node.js。请手动安装 Node.js LTS：https://nodejs.org/' };
+    return { ...status, ok: false, winget, error: `未检测到可用 winget，无法自动安装 Node.js。${winget.error || '请手动安装 Node.js LTS：https://nodejs.org/'}` };
   }
 
-  const install = await runCommand('winget', [
+  const installArgs = [
     'install',
+    '--id',
     'OpenJS.NodeJS.LTS',
     '-e',
     '--accept-package-agreements',
     '--accept-source-agreements'
-  ]);
+  ];
+  if (winget.mirror?.ok && winget.mirror?.sourceName) {
+    installArgs.push('--source', winget.mirror.sourceName);
+  }
+  const install = await runCommand('winget', installArgs, { env: winget.env || process.env });
   if (install.code !== 0) {
     return { ...status, ok: false, install, error: `Node.js LTS 安装指令失败，退出码 ${install.code}` };
   }
@@ -279,14 +499,21 @@ ipcMain.handle('dialog:dir', async () => {
 ipcMain.handle('log:read', () => fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8') : '');
 
 ipcMain.handle('install:all', async (_, cfg) => {
-  cfg = { ...defaults, ...cfg };
+  cfg = mergeConfig(cfg);
   writeConfig(cfg);
   fs.mkdirSync(cfg.installDir, { recursive: true });
   fs.mkdirSync(cfg.npmPrefix, { recursive: true });
   let env = { ...process.env, npm_config_prefix: cfg.npmPrefix };
 
   const results = [];
-  const nodeStatus = await ensureNodeEnvironment(env);
+  const wingetStatus = await ensureWingetAvailable({ showDialog: true });
+  results.push({
+    code: wingetStatus.ok ? 0 : 1,
+    output: wingetStatus.ok
+      ? `winget 已就绪：${wingetStatus.winget.output.trim()}${wingetStatus.installed ? '\n已自动安装 winget。' : ''}${wingetStatus.registered ? '\n已注册系统中的 App Installer / winget。' : ''}${wingetStatus.mirror?.ok ? `\n已配置国内镜像源：${WINGET_USTC_SOURCE_URL}` : '\n国内镜像源不可用，已回退 winget 默认源。'}`
+      : `winget 未就绪：${wingetStatus.error || '未知错误'}`
+  });
+  const nodeStatus = await ensureNodeEnvironment(env, wingetStatus);
   results.push({
     code: nodeStatus.ok ? 0 : -1,
     output: nodeStatus.ok
@@ -299,13 +526,14 @@ ipcMain.handle('install:all', async (_, cfg) => {
   results.push(await setNpmGlobalPrefix(cfg.npmPrefix, env));
   if (cfg.codex?.enabled) results.push(await runCommand('npm', ['install', '-g', cfg.codex.package || '@openai/codex'], { env }));
   if (cfg.claude?.enabled) results.push(await runCommand('npm', ['install', '-g', cfg.claude.package || '@anthropic-ai/claude-code'], { env }));
-  const writeResult = await writeEnvFiles(cfg);
+  const writeResult = await writeEnvFiles(cfg, { writeApiConfigs: true });
   results.push({ code: writeResult.pathResult.code, output: writeResult.pathResult.output });
   results.push(await verifyGlobalInstall(cfg, buildScanEnv(cfg, env)));
   return results;
 });
 
-async function writeEnvFiles(cfg) {
+async function writeEnvFiles(cfg, options = {}) {
+  cfg = mergeConfig(cfg);
   fs.mkdirSync(cfg.installDir, { recursive: true });
   const envFile = path.join(cfg.installDir, 'ai-cli-env.cmd');
   const bashFile = path.join(cfg.installDir, 'ai-cli-env.sh');
@@ -323,17 +551,29 @@ async function writeEnvFiles(cfg) {
     proxyLines.sh
   ].filter(Boolean).join('\n');
   fs.writeFileSync(bashFile, sh, 'utf8');
-  if (cfg.codex?.enabled) writeCodexCliSettings(cfg);
-  writeClaudeSettings(cfg);
+  if (options.writeApiConfigs !== false) {
+    if (cfg.codex?.enabled) writeCodexCliSettings(cfg);
+    if (cfg.claude?.enabled) writeClaudeSettings(cfg);
+  }
   const pathResult = await ensureUserPathEntry(binPath);
   appendLog(`USER PATH ${pathResult.code === 0 ? 'OK' : 'FAILED'} ${binPath}`);
   appendLog(`WROTE env files ${envFile} ${bashFile}`);
   return { envFile, bashFile, binPath, pathResult };
 }
 
-ipcMain.handle('config:apply', async (_, cfg) => { writeConfig(cfg); await writeEnvFiles(cfg); return { ok: true }; });
+ipcMain.handle('config:apply', async (_, cfg, tool) => {
+  const merged = mergeConfig(cfg);
+  writeConfig(merged);
+  return { ok: true, ...writeSelectedApiConfig(merged, tool) };
+});
+ipcMain.handle('config:env', async (_, cfg) => {
+  const merged = mergeConfig(cfg);
+  writeConfig(merged);
+  const result = await writeEnvFiles(merged, { writeApiConfigs: false });
+  return { ok: true, ...result };
+});
 async function scanInstalledTools(cfg) {
-  cfg = { ...defaults, ...cfg };
+  cfg = mergeConfig(cfg);
   const env = buildScanEnv(cfg, process.env);
   const codexVersion = await runCommand('codex', ['--version'], { env });
   const codexPath = codexVersion.code === 0 ? await runCommand('where', ['codex'], { env }) : { code: -1, output: '' };
