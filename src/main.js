@@ -22,6 +22,8 @@ const defaults = {
   claude: { enabled: true, package: '@anthropic-ai/claude-code', baseUrl: 'http://localhost:3000/v1', apiKey: '', configTemplate: defaultClaudeConfigTemplate() }
 };
 const WINGET_INSTALLER_URL = 'https://aka.ms/getwinget';
+const WINGET_INSTALLER_BUNDLE = 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle';
+const WINGET_INSTALLER_MIN_BYTES = 50 * 1024 * 1024;
 const WINGET_USTC_SOURCE_NAME = 'ustc';
 const WINGET_USTC_SOURCE_URL = 'https://mirrors.ustc.edu.cn/winget-source';
 
@@ -74,7 +76,31 @@ function writeSelectedApiConfig(cfg, tool) {
 }
 function appendLog(s) { fs.appendFileSync(LOG, `[${new Date().toISOString()}] ${s}\n`, 'utf8'); }
 function redact(s) { return String(s || '').replace(/(sk-[A-Za-z0-9_-]{8,})/g, 'sk-***').replace(/(Bearer\s+)[^\s]+/g, '$1***'); }
-function tailOutput(result, limit = 1600) { return String(result?.output || '').trim().slice(-limit); }
+function decodePowerShellEscapes(value) {
+  return String(value || '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/_x([0-9A-Fa-f]{4})_/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+function cleanPowerShellOutput(output) {
+  const text = String(output || '');
+  if (!text.includes('#< CLIXML')) return text.trim();
+
+  const chunks = [];
+  const regex = /<S(?:\s+[^>]*)?>([\s\S]*?)<\/S>/g;
+  let match;
+  while ((match = regex.exec(text))) {
+    const value = decodePowerShellEscapes(match[1]).trim();
+    if (value) chunks.push(value);
+  }
+  return (chunks.length ? chunks.join('\n') : text.replace('#< CLIXML', '')).replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function tailOutput(result, limit = 1600) { return cleanPowerShellOutput(result?.output || '').trim().slice(-limit); }
 
 let mainWindow;
 function createWindow() {
@@ -101,13 +127,26 @@ function runCommand(command, args, opts = {}) {
 
 function runProcess(command, args, opts = {}) {
   return new Promise((resolve) => {
-    const { logArgs, ...spawnOpts } = opts;
+    const { logArgs, outputTransform, ...spawnOpts } = opts;
     appendLog(`RUN ${command} ${(logArgs || args).join(' ')}`);
     const child = spawn(command, args, { windowsHide: true, ...spawnOpts });
     let output = '';
-    child.stdout.on('data', d => { const t = d.toString(); output += t; mainWindow?.webContents.send('log', redact(t)); });
-    child.stderr.on('data', d => { const t = d.toString(); output += t; mainWindow?.webContents.send('log', redact(t)); });
-    child.on('close', code => { appendLog(`EXIT ${code}\n${redact(output).slice(-4000)}`); resolve({ code, output: redact(output) }); });
+    child.stdout.on('data', d => {
+      const t = d.toString();
+      output += t;
+      if (!outputTransform) mainWindow?.webContents.send('log', redact(t));
+    });
+    child.stderr.on('data', d => {
+      const t = d.toString();
+      output += t;
+      if (!outputTransform) mainWindow?.webContents.send('log', redact(t));
+    });
+    child.on('close', code => {
+      const finalOutput = outputTransform ? outputTransform(output) : output;
+      if (outputTransform && finalOutput) mainWindow?.webContents.send('log', `${redact(finalOutput)}\n`);
+      appendLog(`EXIT ${code}\n${redact(finalOutput).slice(-4000)}`);
+      resolve({ code, output: redact(finalOutput) });
+    });
     child.on('error', err => resolve({ code: -1, output: String(err) }));
   });
 }
@@ -151,7 +190,7 @@ async function runPowerShell(script) {
   return runProcess(
     powershellPath(),
     ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
-    { logArgs: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', '<encoded>'] }
+    { logArgs: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', '<encoded>'], outputTransform: cleanPowerShellOutput }
   );
 }
 
@@ -167,6 +206,7 @@ async function showWingetInstallFailureDialog(detail) {
     String(detail || '当前系统不支持自动安装，或下载安装 App Installer 失败。').trim(),
     '',
     `可以手动安装 App Installer / winget：${WINGET_INSTALLER_URL}`,
+    `如果已经下载到本机，也可以直接安装：%TEMP%\\ClaudeCodexManager\\${WINGET_INSTALLER_BUNDLE}`,
     `winget 可用后，程序会优先尝试使用国内源：${WINGET_USTC_SOURCE_URL}`
   ].join('\n');
   appendLog(`WINGET INSTALL FAILED: ${redact(body)}`);
@@ -185,17 +225,61 @@ async function installWingetWithAppInstaller() {
   if (process.platform !== 'win32') {
     return { code: -1, output: 'winget 自动安装仅支持 Windows。' };
   }
+  const tempDir = path.join(os.tmpdir(), 'ClaudeCodexManager');
+  const bundle = path.join(tempDir, WINGET_INSTALLER_BUNDLE);
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "$ProgressPreference = 'SilentlyContinue'",
-    "if (-not (Get-Command Add-AppxPackage -ErrorAction SilentlyContinue)) { throw '当前系统不支持 Add-AppxPackage，无法自动安装 winget。' }",
+    "function Fail([string]$message) { Write-Output $message; exit 1 }",
+    "function IsValidBundle([string]$path) {",
+    "  if (-not (Test-Path $path)) { return $false }",
+    "  $item = Get-Item $path -ErrorAction SilentlyContinue",
+    `  return ($item -and $item.Length -ge ${WINGET_INSTALLER_MIN_BYTES})`,
+    "}",
+    "if (-not (Get-Command Add-AppxPackage -ErrorAction SilentlyContinue)) { Fail '当前系统不支持 Add-AppxPackage，无法自动安装 winget。' }",
     "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}",
     `$installerUrl = ${psString(WINGET_INSTALLER_URL)}`,
-    "$tempDir = Join-Path $env:TEMP 'ClaudeCodexManager'",
+    `$tempDir = ${psString(tempDir)}`,
+    `$bundle = ${psString(bundle)}`,
     "New-Item -ItemType Directory -Force -Path $tempDir | Out-Null",
-    "$bundle = Join-Path $tempDir 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle'",
-    "Invoke-WebRequest -Uri $installerUrl -OutFile $bundle -UseBasicParsing",
-    "Add-AppxPackage -Path $bundle",
+    "if (IsValidBundle $bundle) {",
+    "  Write-Output \"reuse existing winget installer: $bundle\"",
+    "} else {",
+    "  Remove-Item -Path $bundle -Force -ErrorAction SilentlyContinue",
+    "  $downloadErrors = New-Object System.Collections.Generic.List[string]",
+    "  for ($i = 1; $i -le 3; $i++) {",
+    "    try {",
+    "      Write-Output \"downloading winget installer with Invoke-WebRequest, attempt $i/3: $installerUrl\"",
+    "      Invoke-WebRequest -Uri $installerUrl -OutFile $bundle -UseBasicParsing",
+    "      if (IsValidBundle $bundle) { break }",
+    "      $downloadErrors.Add(\"Invoke-WebRequest attempt $i downloaded an incomplete file.\")",
+    "    } catch {",
+    "      $downloadErrors.Add(\"Invoke-WebRequest attempt $i failed: $($_.Exception.Message)\")",
+    "    }",
+    "    Remove-Item -Path $bundle -Force -ErrorAction SilentlyContinue",
+    "    Start-Sleep -Seconds (2 * $i)",
+    "  }",
+    "  if (-not (IsValidBundle $bundle) -and (Get-Command curl.exe -ErrorAction SilentlyContinue)) {",
+    "    try {",
+    "      Write-Output \"downloading winget installer with curl.exe: $installerUrl\"",
+    "      & curl.exe -L --fail --silent --show-error --retry 3 --retry-delay 2 --connect-timeout 20 -o $bundle $installerUrl",
+    "      if ($LASTEXITCODE -ne 0) { throw \"curl.exe exited with code $LASTEXITCODE\" }",
+    "      if (-not (IsValidBundle $bundle)) { $downloadErrors.Add('curl.exe downloaded an incomplete file.') }",
+    "    } catch {",
+    "      $downloadErrors.Add(\"curl.exe failed: $($_.Exception.Message)\")",
+    "    }",
+    "  }",
+    "  if (-not (IsValidBundle $bundle)) {",
+    "    $errors = ($downloadErrors | Where-Object { $_ }) -join \"`n\"",
+    "    Fail \"无法下载 App Installer / winget 安装包。请确认当前网络可以访问 $installerUrl，或手动下载后安装。保存路径：$bundle`n$errors\"",
+    "  }",
+    "}",
+    "Write-Output \"installing winget installer: $bundle\"",
+    "try {",
+    "  Add-AppxPackage -Path $bundle",
+    "} catch {",
+    "  Fail \"App Installer 安装包已下载，但 Add-AppxPackage 安装失败。请尝试右键以管理员身份运行本程序，或手动安装：$bundle`n$($_.Exception.Message)\"",
+    "}",
     "Write-Output \"winget installer installed from $installerUrl\""
   ].join('\n');
   return runPowerShell(script);
@@ -207,8 +291,13 @@ async function registerWingetIfAppInstallerPresent() {
   }
   const script = [
     "$ErrorActionPreference = 'Stop'",
-    "if (-not (Get-Command Add-AppxPackage -ErrorAction SilentlyContinue)) { throw '当前系统不支持 Add-AppxPackage，无法注册 winget。' }",
-    "Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe",
+    "function Fail([string]$message) { Write-Output $message; exit 1 }",
+    "if (-not (Get-Command Add-AppxPackage -ErrorAction SilentlyContinue)) { Fail '当前系统不支持 Add-AppxPackage，无法注册 winget。' }",
+    "try {",
+    "  Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe",
+    "} catch {",
+    "  Fail \"系统中没有可注册的 App Installer，或注册失败。$($_.Exception.Message)\"",
+    "}",
     "Write-Output 'requested winget registration for Microsoft.DesktopAppInstaller_8wekyb3d8bbwe'"
   ].join('\n');
   return runPowerShell(script);
