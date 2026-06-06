@@ -2,3 +2,5 @@ dist/*.exe filter=lfs diff=lfs merge=lfs -text
 dist/**/*.exe filter=lfs diff=lfs merge=lfs -text
 dist/*.zip filter=lfs diff=lfs merge=lfs -text
 dist/**/*.zip filter=lfs diff=lfs merge=lfs -text
+src/vendor/winget/*.msixbundle filter=lfs diff=lfs merge=lfs -text
+src/vendor/winget/*.zip filter=lfs diff=lfs merge=lfs -text

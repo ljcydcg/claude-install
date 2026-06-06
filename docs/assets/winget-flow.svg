@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="520" viewBox="0 0 1180 520" role="img" aria-labelledby="title desc">
+  <title id="title">winget 检查与安装兜底流程</title>
+  <desc id="desc">展示程序如何检测 winget，尝试注册 App Installer，安装 winget，配置国内源，以及失败弹框。</desc>
+  <defs>
+    <style>
+      .bg{fill:#0b1220}.title{font-family:"Microsoft YaHei","Segoe UI",Arial,sans-serif;fill:#f8fafc}.text{font-family:"Microsoft YaHei","Segoe UI",Arial,sans-serif;fill:#e5e7eb}.muted{fill:#a5b4fc}.box{fill:#111827;stroke:#475569;stroke-width:2}.good{fill:#052e2b;stroke:#14b8a6;stroke-width:2}.warn{fill:#3b2407;stroke:#f59e0b;stroke-width:2}.bad{fill:#3b0a0a;stroke:#ef4444;stroke-width:2}.arrow{stroke:#cbd5e1;stroke-width:3;fill:none;marker-end:url(#arrow)}.arrow2{stroke:#f59e0b;stroke-width:3;fill:none;marker-end:url(#arrowWarn)}
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#cbd5e1"/></marker>
+    <marker id="arrowWarn" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#f59e0b"/></marker>
+  </defs>
+  <rect class="bg" width="1180" height="520"/>
+  <text class="title" x="48" y="54" font-size="32" font-weight="700">winget 检查、安装与国内源策略</text>
+  <text class="muted" x="48" y="86" font-size="18">目标：能自动安装就自动安装；不能安装就弹框提示；国内源可用时优先使用。</text>
+
+  <rect class="box" x="58" y="152" width="190" height="88" rx="14"/>
+  <text class="text" x="92" y="188" font-size="19" font-weight="700">检测 winget</text>
+  <text class="muted" x="92" y="216" font-size="15">winget --version</text>
+
+  <rect class="good" x="336" y="82" width="250" height="92" rx="14"/>
+  <text class="text" x="386" y="120" font-size="19" font-weight="700">已存在</text>
+  <text class="muted" x="370" y="148" font-size="15">直接进入源配置</text>
+
+  <rect class="warn" x="336" y="248" width="250" height="104" rx="14"/>
+  <text class="text" x="382" y="286" font-size="19" font-weight="700">未检测到</text>
+  <text class="muted" x="364" y="314" font-size="15">先注册 App Installer</text>
+  <text class="muted" x="364" y="338" font-size="15">再下载 getwinget 安装</text>
+
+  <rect class="good" x="676" y="152" width="250" height="104" rx="14"/>
+  <text class="text" x="720" y="190" font-size="19" font-weight="700">配置国内源</text>
+  <text class="muted" x="704" y="218" font-size="15">USTC WinGet Source</text>
+  <text class="muted" x="704" y="242" font-size="15">可用则安装时指定 --source</text>
+
+  <rect class="good" x="980" y="152" width="146" height="104" rx="14"/>
+  <text class="text" x="1018" y="190" font-size="19" font-weight="700">继续</text>
+  <text class="muted" x="1008" y="218" font-size="15">安装 Node</text>
+  <text class="muted" x="1008" y="242" font-size="15">安装 CLI</text>
+
+  <rect class="bad" x="676" y="330" width="450" height="96" rx="14"/>
+  <text class="text" x="710" y="366" font-size="19" font-weight="700">无法自动安装 winget</text>
+  <text class="muted" x="710" y="394" font-size="15">弹框提示原因，并给出手动安装 App Installer / winget 的地址。</text>
+
+  <path class="arrow" d="M248 174 C288 132 300 128 336 128"/>
+  <path class="arrow2" d="M248 218 C292 280 300 300 336 300"/>
+  <path class="arrow" d="M586 128 C622 128 640 180 676 190"/>
+  <path class="arrow" d="M586 300 C628 300 632 228 676 212"/>
+  <path class="arrow" d="M926 204 L980 204"/>
+  <path class="arrow2" d="M586 332 C620 386 636 388 676 388"/>
+</svg>

@@ -31,7 +31,11 @@
       "src/**/*",
       "package.json"
     ],
+    "asarUnpack": [
+      "src/vendor/winget/**/*"
+    ],
     "win": {
+      "artifactName": "Claude-Codex-Manager-${version}-${arch}.${ext}",
       "target": [
         "nsis",
         "portable"

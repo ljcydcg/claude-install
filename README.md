@@ -1,5 +1,7 @@
 # Claude / Codex Manager
 
+图文使用说明：[docs/Claude-Codex-Manager-使用说明.md](docs/Claude-Codex-Manager-使用说明.md)
+
 这是一个 Windows 桌面程序，用于管理：
 
 - OpenAI Codex CLI（npm 包：`@openai/codex`）

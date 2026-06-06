@@ -22,7 +22,8 @@ const defaults = {
   claude: { enabled: true, package: '@anthropic-ai/claude-code', baseUrl: 'http://localhost:3000/v1', apiKey: '', configTemplate: defaultClaudeConfigTemplate() }
 };
 const WINGET_INSTALLER_URL = 'https://aka.ms/getwinget';
-const WINGET_INSTALLER_BUNDLE = 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle';
+const WINGET_INSTALLER_FILE = 'Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle';
+const WINGET_DEPENDENCIES_FILE = 'DesktopAppInstaller_Dependencies.zip';
 const WINGET_INSTALLER_MIN_BYTES = 50 * 1024 * 1024;
 const WINGET_USTC_SOURCE_NAME = 'ustc';
 const WINGET_USTC_SOURCE_URL = 'https://mirrors.ustc.edu.cn/winget-source';
@@ -176,6 +177,50 @@ function withCommonWingetPath(env = process.env) {
   return process.platform === 'win32' ? withPathEntries(env, [commonWindowsAppsPath()]) : env;
 }
 
+function bundledWingetCandidates(fileName) {
+  const candidates = [];
+  const resourcesPath = process.resourcesPath;
+  if (resourcesPath) {
+    candidates.push(path.join(resourcesPath, 'app.asar.unpacked', 'src', 'vendor', 'winget', fileName));
+    candidates.push(path.join(resourcesPath, 'app', 'src', 'vendor', 'winget', fileName));
+  }
+  candidates.push(path.join(__dirname, 'vendor', 'winget', fileName));
+  return candidates;
+}
+
+function findBundledWingetFile(fileName) {
+  for (const candidate of bundledWingetCandidates(fileName)) {
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+    } catch {}
+  }
+  return null;
+}
+
+function stageBundledWingetInstaller() {
+  const bundleSource = findBundledWingetFile(WINGET_INSTALLER_FILE);
+  if (!bundleSource) {
+    const searched = bundledWingetCandidates(WINGET_INSTALLER_FILE).join('\n');
+    throw new Error(`未找到随程序打包的 winget 安装包：${WINGET_INSTALLER_FILE}\n已搜索：\n${searched}`);
+  }
+  const bundleSize = fs.statSync(bundleSource).size;
+  if (bundleSize < WINGET_INSTALLER_MIN_BYTES) {
+    throw new Error(`随程序打包的 winget 安装包不完整：${bundleSource}，大小 ${bundleSize} bytes`);
+  }
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ClaudeCodexManager-winget-'));
+  const bundle = path.join(tempDir, WINGET_INSTALLER_FILE);
+  fs.copyFileSync(bundleSource, bundle);
+
+  const dependenciesSource = findBundledWingetFile(WINGET_DEPENDENCIES_FILE);
+  const dependenciesZip = dependenciesSource ? path.join(tempDir, WINGET_DEPENDENCIES_FILE) : '';
+  if (dependenciesSource) fs.copyFileSync(dependenciesSource, dependenciesZip);
+
+  appendLog(`STAGED bundled winget installer ${bundleSource} -> ${bundle}`);
+  if (dependenciesSource) appendLog(`STAGED bundled winget dependencies ${dependenciesSource} -> ${dependenciesZip}`);
+  return { tempDir, bundle, dependenciesZip, bundleSource, dependenciesSource };
+}
+
 function powershellPath() {
   const systemRoot = process.env.SystemRoot || 'C:\\Windows';
   return path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
@@ -186,11 +231,24 @@ function psString(value) {
 }
 
 async function runPowerShell(script) {
-  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+  const wrappedScript = [
+    "$ProgressPreference = 'SilentlyContinue'",
+    "try {",
+    script,
+    "} catch {",
+    "  $message = $_.Exception.Message",
+    "  if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) {",
+    "    $message = \"$message`n$($_.InvocationInfo.PositionMessage)\"",
+    "  }",
+    "  Write-Output \"ERROR: $message\"",
+    "  exit 1",
+    "}"
+  ].join('\n');
+  const encoded = Buffer.from(wrappedScript, 'utf16le').toString('base64');
   return runProcess(
     powershellPath(),
-    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
-    { logArgs: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', '<encoded>'], outputTransform: cleanPowerShellOutput }
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+    { logArgs: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', '<encoded>'], outputTransform: cleanPowerShellOutput }
   );
 }
 
@@ -203,10 +261,10 @@ async function getWingetStatus(env = process.env) {
 async function showWingetInstallFailureDialog(detail) {
   const message = '无法自动安装 winget';
   const body = [
-    String(detail || '当前系统不支持自动安装，或下载安装 App Installer 失败。').trim(),
+    String(detail || '当前系统不支持自动安装，或安装本地 App Installer 包失败。').trim(),
     '',
-    `可以手动安装 App Installer / winget：${WINGET_INSTALLER_URL}`,
-    `如果已经下载到本机，也可以直接安装：%TEMP%\\ClaudeCodexManager\\${WINGET_INSTALLER_BUNDLE}`,
+    `程序会优先使用随安装包打包的本地 App Installer / winget 安装包。`,
+    `本地包来源：${WINGET_INSTALLER_URL}`,
     `winget 可用后，程序会优先尝试使用国内源：${WINGET_USTC_SOURCE_URL}`
   ].join('\n');
   appendLog(`WINGET INSTALL FAILED: ${redact(body)}`);
@@ -225,64 +283,46 @@ async function installWingetWithAppInstaller() {
   if (process.platform !== 'win32') {
     return { code: -1, output: 'winget 自动安装仅支持 Windows。' };
   }
-  const tempDir = path.join(os.tmpdir(), 'ClaudeCodexManager');
-  const bundle = path.join(tempDir, WINGET_INSTALLER_BUNDLE);
+  let staged;
+  try {
+    staged = stageBundledWingetInstaller();
+  } catch (err) {
+    return { code: -1, output: String(err?.message || err) };
+  }
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "$ProgressPreference = 'SilentlyContinue'",
-    "function Fail([string]$message) { Write-Output $message; exit 1 }",
-    "function IsValidBundle([string]$path) {",
-    "  if (-not (Test-Path $path)) { return $false }",
-    "  $item = Get-Item $path -ErrorAction SilentlyContinue",
-    `  return ($item -and $item.Length -ge ${WINGET_INSTALLER_MIN_BYTES})`,
+    "if (-not (Get-Command Add-AppxPackage -ErrorAction SilentlyContinue)) { throw '当前系统不支持 Add-AppxPackage，无法自动安装 winget。' }",
+    `$bundle = ${psString(staged.bundle)}`,
+    `$dependenciesZip = ${psString(staged.dependenciesZip)}`,
+    `$tempDir = ${psString(staged.tempDir)}`,
+    "if (-not (Test-Path -LiteralPath $bundle)) { throw '本地 winget 安装包不存在。' }",
+    "$bundleInfo = Get-Item -LiteralPath $bundle",
+    "if ($bundleInfo.Length -lt 1048576) { throw \"winget 安装包过小，可能下载到了错误页面：$($bundleInfo.Length) bytes\" }",
+    "$dependencyPaths = @()",
+    "if ($dependenciesZip -and (Test-Path -LiteralPath $dependenciesZip)) {",
+    "  $dependenciesDir = Join-Path $tempDir 'dependencies'",
+    "  Expand-Archive -LiteralPath $dependenciesZip -DestinationPath $dependenciesDir -Force",
+    "  $arch = if ([Environment]::Is64BitOperatingSystem) { 'x64' } else { 'x86' }",
+    "  $dependencyPaths = @(Get-ChildItem -Path $dependenciesDir -Recurse -File -Include '*.appx','*.msix' | Where-Object { $_.Name -match \"_$arch[_.]\" -or $_.Name -match '_neutral[_.]' } | Select-Object -ExpandProperty FullName)",
     "}",
-    "if (-not (Get-Command Add-AppxPackage -ErrorAction SilentlyContinue)) { Fail '当前系统不支持 Add-AppxPackage，无法自动安装 winget。' }",
-    "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}",
-    `$installerUrl = ${psString(WINGET_INSTALLER_URL)}`,
-    `$tempDir = ${psString(tempDir)}`,
-    `$bundle = ${psString(bundle)}`,
-    "New-Item -ItemType Directory -Force -Path $tempDir | Out-Null",
-    "if (IsValidBundle $bundle) {",
-    "  Write-Output \"reuse existing winget installer: $bundle\"",
+    "if ($dependencyPaths.Count -gt 0) {",
+    "  Add-AppxPackage -Path $bundle -DependencyPath $dependencyPaths -ForceApplicationShutdown",
     "} else {",
-    "  Remove-Item -Path $bundle -Force -ErrorAction SilentlyContinue",
-    "  $downloadErrors = New-Object System.Collections.Generic.List[string]",
-    "  for ($i = 1; $i -le 3; $i++) {",
-    "    try {",
-    "      Write-Output \"downloading winget installer with Invoke-WebRequest, attempt $i/3: $installerUrl\"",
-    "      Invoke-WebRequest -Uri $installerUrl -OutFile $bundle -UseBasicParsing",
-    "      if (IsValidBundle $bundle) { break }",
-    "      $downloadErrors.Add(\"Invoke-WebRequest attempt $i downloaded an incomplete file.\")",
-    "    } catch {",
-    "      $downloadErrors.Add(\"Invoke-WebRequest attempt $i failed: $($_.Exception.Message)\")",
-    "    }",
-    "    Remove-Item -Path $bundle -Force -ErrorAction SilentlyContinue",
-    "    Start-Sleep -Seconds (2 * $i)",
-    "  }",
-    "  if (-not (IsValidBundle $bundle) -and (Get-Command curl.exe -ErrorAction SilentlyContinue)) {",
-    "    try {",
-    "      Write-Output \"downloading winget installer with curl.exe: $installerUrl\"",
-    "      & curl.exe -L --fail --silent --show-error --retry 3 --retry-delay 2 --connect-timeout 20 -o $bundle $installerUrl",
-    "      if ($LASTEXITCODE -ne 0) { throw \"curl.exe exited with code $LASTEXITCODE\" }",
-    "      if (-not (IsValidBundle $bundle)) { $downloadErrors.Add('curl.exe downloaded an incomplete file.') }",
-    "    } catch {",
-    "      $downloadErrors.Add(\"curl.exe failed: $($_.Exception.Message)\")",
-    "    }",
-    "  }",
-    "  if (-not (IsValidBundle $bundle)) {",
-    "    $errors = ($downloadErrors | Where-Object { $_ }) -join \"`n\"",
-    "    Fail \"无法下载 App Installer / winget 安装包。请确认当前网络可以访问 $installerUrl，或手动下载后安装。保存路径：$bundle`n$errors\"",
-    "  }",
+    "  Add-AppxPackage -Path $bundle -ForceApplicationShutdown",
     "}",
-    "Write-Output \"installing winget installer: $bundle\"",
-    "try {",
-    "  Add-AppxPackage -Path $bundle",
-    "} catch {",
-    "  Fail \"App Installer 安装包已下载，但 Add-AppxPackage 安装失败。请尝试右键以管理员身份运行本程序，或手动安装：$bundle`n$($_.Exception.Message)\"",
-    "}",
-    "Write-Output \"winget installer installed from $installerUrl\""
+    "Write-Output \"winget installer installed from bundled package: $bundle\""
   ].join('\n');
   return runPowerShell(script);
+}
+
+function buildWingetResult(wingetStatus) {
+  return {
+    code: wingetStatus.ok ? 0 : 1,
+    output: wingetStatus.ok
+      ? `winget 已就绪：${wingetStatus.winget.output.trim()}${wingetStatus.installed ? '\n已自动安装 winget。' : ''}${wingetStatus.registered ? '\n已注册系统中的 App Installer / winget。' : ''}${wingetStatus.mirror?.ok ? `\n已配置国内镜像源：${WINGET_USTC_SOURCE_URL}` : '\n国内镜像源不可用，已回退 winget 默认源。'}`
+      : `winget 未就绪：${wingetStatus.error || '未知错误'}`
+  };
 }
 
 async function registerWingetIfAppInstallerPresent() {
@@ -406,8 +446,8 @@ async function ensureWingetAvailable(options = {}) {
       }
     }
 
-    mainWindow?.webContents.send('log', '\n注册后仍未检测到 winget，开始尝试安装 App Installer / winget...\n');
-    appendLog('WINGET MISSING: installing App Installer');
+    mainWindow?.webContents.send('log', '\n注册后仍未检测到 winget，开始使用本地安装包安装 App Installer / winget...\n');
+    appendLog('WINGET MISSING: installing bundled App Installer');
     const install = await installWingetWithAppInstaller();
     if (install.code !== 0) {
       const error = `winget 自动安装失败，退出码 ${install.code}`;
@@ -566,10 +606,12 @@ async function ensureNodeEnvironment(env = process.env, wingetStatus = null) {
   }
   const install = await runCommand('winget', installArgs, { env: winget.env || process.env });
   if (install.code !== 0) {
-    return { ...status, ok: false, install, error: `Node.js LTS 安装指令失败，退出码 ${install.code}` };
+    return { ...status, ok: false, winget, install, error: `Node.js LTS 安装指令失败，退出码 ${install.code}` };
   }
 
   status = await getNodeEnvironmentStatus(env);
+  status.winget = winget;
+  status.install = install;
   mainWindow?.webContents.send('log', '\n=== NODE ENV RECHECK ===\n');
   mainWindow?.webContents.send('log', `node: ${status.node.ok ? status.node.output.trim() : '仍未检测到'}\n`);
   mainWindow?.webContents.send('log', `npm: ${status.npm.ok ? status.npm.output.trim() : '仍未检测到'}\n`);
@@ -596,12 +638,8 @@ ipcMain.handle('install:all', async (_, cfg) => {
 
   const results = [];
   const wingetStatus = await ensureWingetAvailable({ showDialog: true });
-  results.push({
-    code: wingetStatus.ok ? 0 : 1,
-    output: wingetStatus.ok
-      ? `winget 已就绪：${wingetStatus.winget.output.trim()}${wingetStatus.installed ? '\n已自动安装 winget。' : ''}${wingetStatus.registered ? '\n已注册系统中的 App Installer / winget。' : ''}${wingetStatus.mirror?.ok ? `\n已配置国内镜像源：${WINGET_USTC_SOURCE_URL}` : '\n国内镜像源不可用，已回退 winget 默认源。'}`
-      : `winget 未就绪：${wingetStatus.error || '未知错误'}`
-  });
+  results.push(buildWingetResult(wingetStatus));
+  if (!wingetStatus.ok) return results;
   const nodeStatus = await ensureNodeEnvironment(env, wingetStatus);
   results.push({
     code: nodeStatus.ok ? 0 : -1,

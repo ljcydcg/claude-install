@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="720" viewBox="0 0 1180 720" role="img" aria-labelledby="title desc">
+  <title id="title">Claude Codex Manager 主界面导览</title>
+  <desc id="desc">展示程序主界面的安装路径、API 配置、操作按钮和日志区域。</desc>
+  <defs>
+    <style>
+      .bg{fill:#0f172a}.panel{fill:#172033;stroke:#33415f;stroke-width:2}.panel2{fill:#111a2c;stroke:#33415f;stroke-width:2}.text{font-family:"Microsoft YaHei","Segoe UI",Arial,sans-serif;fill:#e9eef7}.muted{fill:#9fb0cc}.green{fill:#86efac}.yellow{fill:#fbbf24}.red{fill:#fca5a5}.blue{fill:#60a5fa}.btn{fill:#2563eb}.btn2{fill:#334155}.btn3{fill:#b45309}.line{stroke:#60a5fa;stroke-width:3;fill:none;marker-end:url(#arrow)}.callout{fill:#0b1220;stroke:#60a5fa;stroke-width:2}
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#60a5fa"/>
+    </marker>
+  </defs>
+  <rect class="bg" width="1180" height="720" rx="0"/>
+  <text class="text" x="48" y="52" font-size="32" font-weight="700">Claude / Codex 桌面管理器</text>
+  <text class="muted" x="48" y="84" font-size="18">一键安装 Codex CLI 与 Claude Code CLI，并写入 base_url / key 配置</text>
+
+  <rect class="panel" x="48" y="118" width="710" height="124" rx="14"/>
+  <text class="text" x="72" y="154" font-size="22" font-weight="700">1. 安装路径</text>
+  <text class="muted" x="72" y="188" font-size="17">安装根目录</text>
+  <rect class="panel2" x="188" y="166" width="410" height="34" rx="8"/>
+  <text class="text" x="202" y="189" font-size="15">C:\Users\用户名\ai-cli-tools</text>
+  <rect class="btn2" x="620" y="166" width="92" height="34" rx="8"/>
+  <text class="text" x="648" y="189" font-size="15">选择</text>
+  <text class="muted" x="72" y="224" font-size="17">npm prefix</text>
+  <rect class="panel2" x="188" y="204" width="410" height="28" rx="8"/>
+  <text class="text" x="202" y="224" font-size="14">...\ai-cli-tools\npm-global</text>
+
+  <rect class="panel" x="48" y="268" width="710" height="238" rx="14"/>
+  <text class="text" x="72" y="304" font-size="22" font-weight="700">2. Codex / Claude Code API 配置</text>
+  <rect class="panel2" x="72" y="326" width="650" height="148" rx="12"/>
+  <text class="text" x="96" y="360" font-size="18" font-weight="700">Codex CLI API 配置</text>
+  <rect x="266" y="337" width="102" height="28" rx="14" fill="#064e3b"/>
+  <text class="green" x="282" y="357" font-size="14">已安装</text>
+  <text class="muted" x="96" y="397" font-size="16">Provider</text>
+  <rect class="panel" x="190" y="377" width="160" height="34" rx="8"/>
+  <text class="text" x="204" y="400" font-size="14">rightcode</text>
+  <text class="muted" x="380" y="397" font-size="16">Model</text>
+  <rect class="panel" x="448" y="377" width="160" height="34" rx="8"/>
+  <text class="text" x="462" y="400" font-size="14">gpt-5.5</text>
+  <text class="muted" x="96" y="441" font-size="16">Base URL</text>
+  <rect class="panel" x="190" y="421" width="418" height="34" rx="8"/>
+  <text class="text" x="204" y="444" font-size="14">http://localhost:3000/v1</text>
+
+  <rect class="panel" x="48" y="532" width="710" height="134" rx="14"/>
+  <text class="text" x="72" y="568" font-size="22" font-weight="700">3. 操作与日志</text>
+  <rect class="btn" x="72" y="594" width="94" height="38" rx="8"/>
+  <text class="text" x="90" y="619" font-size="15" font-weight="700">保存配置</text>
+  <rect class="btn2" x="178" y="594" width="124" height="38" rx="8"/>
+  <text class="text" x="198" y="619" font-size="15" font-weight="700">生成环境配置</text>
+  <rect class="btn3" x="314" y="594" width="210" height="38" rx="8"/>
+  <text class="text" x="342" y="619" font-size="15" font-weight="700">一键安装 / 更新</text>
+  <rect class="btn2" x="536" y="594" width="92" height="38" rx="8"/>
+  <text class="text" x="554" y="619" font-size="15" font-weight="700">检查版本</text>
+
+  <rect class="callout" x="820" y="126" width="288" height="86" rx="12"/>
+  <text class="text" x="842" y="158" font-size="18" font-weight="700">安装位置</text>
+  <text class="muted" x="842" y="186" font-size="15">建议放在用户目录或 D 盘，避免污染系统 Node 目录。</text>
+  <path class="line" d="M820 169 C786 169 770 170 720 181"/>
+
+  <rect class="callout" x="820" y="304" width="300" height="110" rx="12"/>
+  <text class="text" x="842" y="336" font-size="18" font-weight="700">API 配置</text>
+  <text class="muted" x="842" y="364" font-size="15">Codex 写入 config.toml / auth.json；</text>
+  <text class="muted" x="842" y="388" font-size="15">Claude Code 写入 .claude/settings.json。</text>
+  <path class="line" d="M820 356 C780 356 752 360 704 382"/>
+
+  <rect class="callout" x="820" y="546" width="300" height="96" rx="12"/>
+  <text class="text" x="842" y="578" font-size="18" font-weight="700">一键安装</text>
+  <text class="muted" x="842" y="606" font-size="15">先检查 winget，再安装 Node.js、Codex CLI 和 Claude Code。</text>
+  <path class="line" d="M820 594 C764 594 650 604 524 612"/>
+</svg>

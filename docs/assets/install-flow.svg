@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="560" viewBox="0 0 1180 560" role="img" aria-labelledby="title desc">
+  <title id="title">一键安装流程图</title>
+  <desc id="desc">展示点击一键安装后，从 winget 检查到 CLI 验证的流程。</desc>
+  <defs>
+    <style>
+      .bg{fill:#f7fafc}.box{fill:#ffffff;stroke:#1f2937;stroke-width:2}.box2{fill:#eff6ff;stroke:#2563eb;stroke-width:2}.warn{fill:#fff7ed;stroke:#b45309;stroke-width:2}.ok{fill:#ecfdf5;stroke:#059669;stroke-width:2}.text{font-family:"Microsoft YaHei","Segoe UI",Arial,sans-serif;fill:#111827}.muted{fill:#4b5563}.arrow{stroke:#374151;stroke-width:3;fill:none;marker-end:url(#arrow)}.dash{stroke:#9ca3af;stroke-width:3;fill:none;stroke-dasharray:8 7;marker-end:url(#arrow2)}
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#374151"/></marker>
+    <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#9ca3af"/></marker>
+  </defs>
+  <rect class="bg" width="1180" height="560"/>
+  <text class="text" x="48" y="54" font-size="32" font-weight="700">点击“一键安装 / 更新”后的执行流程</text>
+  <text class="muted" x="48" y="86" font-size="18">每一步都会输出到程序底部日志区，失败时可复制日志排查。</text>
+
+  <rect class="box2" x="56" y="150" width="170" height="92" rx="14"/>
+  <text class="text" x="96" y="188" font-size="19" font-weight="700">保存配置</text>
+  <text class="muted" x="82" y="216" font-size="15">读取界面填写项</text>
+
+  <rect class="box2" x="292" y="150" width="188" height="92" rx="14"/>
+  <text class="text" x="334" y="188" font-size="19" font-weight="700">检查 winget</text>
+  <text class="muted" x="324" y="216" font-size="15">不存在则尝试安装</text>
+
+  <rect class="box2" x="548" y="150" width="210" height="92" rx="14"/>
+  <text class="text" x="586" y="188" font-size="19" font-weight="700">配置国内源</text>
+  <text class="muted" x="574" y="216" font-size="15">优先使用 USTC 源</text>
+
+  <rect class="box2" x="826" y="150" width="210" height="92" rx="14"/>
+  <text class="text" x="866" y="188" font-size="19" font-weight="700">安装 Node.js</text>
+  <text class="muted" x="856" y="216" font-size="15">通过 winget 安装 LTS</text>
+
+  <path class="arrow" d="M226 196 L292 196"/>
+  <path class="arrow" d="M480 196 L548 196"/>
+  <path class="arrow" d="M758 196 L826 196"/>
+
+  <rect class="box" x="132" y="328" width="210" height="104" rx="14"/>
+  <text class="text" x="174" y="366" font-size="19" font-weight="700">设置 npm prefix</text>
+  <text class="muted" x="164" y="394" font-size="15">安装到独立目录</text>
+
+  <rect class="box" x="418" y="328" width="230" height="104" rx="14"/>
+  <text class="text" x="466" y="366" font-size="19" font-weight="700">安装 CLI 包</text>
+  <text class="muted" x="448" y="394" font-size="15">Codex + Claude Code</text>
+
+  <rect class="box" x="724" y="328" width="230" height="104" rx="14"/>
+  <text class="text" x="774" y="366" font-size="19" font-weight="700">写入配置</text>
+  <text class="muted" x="760" y="394" font-size="15">环境脚本与 API 文件</text>
+
+  <rect class="ok" x="1018" y="328" width="118" height="104" rx="14"/>
+  <text class="text" x="1040" y="366" font-size="19" font-weight="700">验证</text>
+  <text class="muted" x="1040" y="394" font-size="15">where</text>
+  <text class="muted" x="1040" y="416" font-size="15">--version</text>
+
+  <path class="arrow" d="M931 242 C931 286 260 286 237 328"/>
+  <path class="arrow" d="M342 380 L418 380"/>
+  <path class="arrow" d="M648 380 L724 380"/>
+  <path class="arrow" d="M954 380 L1018 380"/>
+
+  <rect class="warn" x="548" y="458" width="408" height="62" rx="12"/>
+  <text class="text" x="574" y="494" font-size="17" font-weight="700">国内源不可用时不会中断安装，会自动回退 winget 默认源。</text>
+  <path class="dash" d="M653 242 C653 292 692 318 752 328"/>
+</svg>
